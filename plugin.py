@@ -50,24 +50,23 @@ class Hardball(callbacks.Plugin):
         # fill in the blanks.
         if not self.games:
             self.games = self._fetchgames()
-
         # now schedule our events.
-        #def checkhardballcron():
-        #    self.checkhardball(irc)
-        #try:  # check scores.
-        #    schedule.addPeriodicEvent(checkhardballcron, self.registryValue('checkScoresInterval'), now=False, name='checkhardball')
-        #except AssertionError:
-        #    try:
-        #        schedule.removeEvent('checkhardball')
-        #    except KeyError:
-        #        pass
-        #    schedule.addPeriodicEvent(checkhardballcron, self.registryValue('checkScoresInterval'), now=False, name='checkhardball')
+        def checkhardballcron():
+            self.checkhardball(irc)
+        try:  # check scores.
+            schedule.addPeriodicEvent(checkhardballcron, self.registryValue('checkInterval'), now=False, name='checkhardball')
+        except AssertionError:
+            try:
+                schedule.removeEvent('checkhardball')
+            except KeyError:
+                pass
+            schedule.addPeriodicEvent(checkhardballcron, self.registryValue('checkInterval'), now=False, name='checkhardball')
 
     def die(self):
-        #try:
-        #    schedule.removeEvent('checkhardball')
-        #except KeyError:
-        #    pass
+        try:
+            schedule.removeEvent('checkhardball')
+        except KeyError:
+            pass
         self.__parent.die()
 
     ######################
@@ -201,65 +200,6 @@ class Hardball(callbacks.Plugin):
                 return None
         else:  # return the dict.
             return validteams
-
-    #############################
-    # PUBLIC CHANNEL OPERATIONS #
-    #############################
-
-    def hardballchannel(self, irc, msg, args, op, optchannel, optarg):
-        """<add|list|del> <#channel> <ALL|TEAM>
-
-        Add or delete team(s) from a specific channel's output.
-        Use team abbreviation for specific teams or ALL for everything. Can only specify one at a time.
-        Ex: #channel1 ALL OR #channel2 NYY
-        """
-
-        # first, lower operation.
-        op = op.lower()
-        # next, make sure op is valid.
-        validop = ['add', 'list', 'del']
-        if op not in validop:  # test for a valid operation.
-            irc.reply("ERROR: '{0}' is an invalid operation. It must be be one of: {1}".format(op, " | ".join([i for i in validop])))
-            return
-        # if we're not doing list (add or del) make sure we have the arguments.
-        if op != 'list':
-            if not optchannel and not optarg:  # add|del need these.
-                irc.reply("ERROR: add and del operations require a channel and team. Ex: add #channel NYY OR del #channel NYY")
-                return
-            # we are doing an add/del op.
-            optchannel, optarg = optchannel.lower(), optarg.upper()
-            # make sure channel is something we're in
-            if optchannel not in irc.state.channels:
-                irc.reply("ERROR: '{0}' is not a valid channel. You must add a channel that we are in.".format(optchannel))
-                return
-            # test for valid team now.
-            testarg = self._validteam(team=optarg)
-            if not testarg:  # invalid arg(team)
-                irc.reply("ERROR: '{0}' is an invalid team/argument. Must be one of: {1}".format(optarg, " | ".join(sorted(self._validteam().keys()))))
-                return
-        # main meat part.
-        # now we handle each op individually.
-        if op == 'add':  # add output to channel.
-            teamid = self._teamnametoid(optarg)  # validated above.
-            self.channels.setdefault(optchannel, set()).add(teamid)  # add it.
-            self._savepickle()  # save.
-            irc.reply("I have added {0} into {1}".format(optarg, optchannel))
-        elif op == 'list':  # list channels
-            if len(self.channels) == 0:  # no channels.
-                irc.reply("ERROR: I have no active channels defined. Please use the hardballchannel add operation to add a channel.")
-            else:   # we do have channels.
-                for (k, v) in self.channels.items():  # iterate through and output
-                    irc.reply("{0} :: {1}".format(k, " | ".join([self._teams(team=q) for q in v])))
-        elif op == 'del':  # delete an item from channels.
-            teamid = self._teamnametoid(optarg)
-            if teamid in self.channels[optchannel]:  # id is already in.
-                self.channels[optchannel].remove(teamid)  # remove it.
-                self._savepickle()  # save it.
-                irc.reply("I have successfully removed {0} from {1}".format(optarg, optchannel))
-            else:
-                irc.reply("ERROR: I do not have {0} in {1}".format(optarg, optchannel))
-
-    hardballchannel = wrap(hardballchannel, [('checkCapability', 'admin'), ('somethingWithoutSpaces'), optional('channel'), optional('somethingWithoutSpaces')])
 
     ####################
     # FETCH OPERATIONS #
@@ -636,6 +576,95 @@ class Hardball(callbacks.Plugin):
     # PUBLIC #
     ##########
 
+    #############################
+    # PUBLIC CHANNEL OPERATIONS #
+    #############################
+
+    def hardballstart(self, irc, msg, args):
+        """
+        start or restart the Hardball timer and live reporting.
+        """
+
+        def checkhardballcron():
+            self.checkhardball(irc)
+        try:
+            schedule.addPeriodicEvent(checkhardballcron, self.registryValue('checkInterval'), now=False, name='checkhardball')
+        except AssertionError:
+            irc.reply("The hardball checker was already running.")
+        else:
+            irc.reply("Hardball checker started.")
+
+    hardballstart = wrap(hardballstart, [('checkCapability', 'admin')])
+
+    def hardballstop(self, irc, msg, args):
+        """
+        start or restart the Hardball timer and live reporting.
+        """
+
+        try:
+            schedule.removeEvent('checkhardball')
+        except KeyError:
+            irc.reply("The hardball checker was not running.")
+        else:
+            irc.reply("Reddit checker stopped.")
+
+    hardballstop = wrap(hardballstop, [('checkCapability', 'admin')])
+
+    def hardballchannel(self, irc, msg, args, op, optchannel, optarg):
+        """<add|list|del> <#channel> <ALL|TEAM>
+
+        Add or delete team(s) from a specific channel's output.
+        Use team abbreviation for specific teams or ALL for everything. Can only specify one at a time.
+        Ex: #channel1 ALL OR #channel2 NYY
+        """
+
+        # first, lower operation.
+        op = op.lower()
+        # next, make sure op is valid.
+        validop = ['add', 'list', 'del']
+        if op not in validop:  # test for a valid operation.
+            irc.reply("ERROR: '{0}' is an invalid operation. It must be be one of: {1}".format(op, " | ".join([i for i in validop])))
+            return
+        # if we're not doing list (add or del) make sure we have the arguments.
+        if op != 'list':
+            if not optchannel and not optarg:  # add|del need these.
+                irc.reply("ERROR: add and del operations require a channel and team. Ex: add #channel NYY OR del #channel NYY")
+                return
+            # we are doing an add/del op.
+            optchannel, optarg = optchannel.lower(), optarg.upper()
+            # make sure channel is something we're in
+            if optchannel not in irc.state.channels:
+                irc.reply("ERROR: '{0}' is not a valid channel. You must add a channel that we are in.".format(optchannel))
+                return
+            # test for valid team now.
+            testarg = self._validteam(team=optarg)
+            if not testarg:  # invalid arg(team)
+                irc.reply("ERROR: '{0}' is an invalid team/argument. Must be one of: {1}".format(optarg, " | ".join(sorted(self._validteam().keys()))))
+                return
+        # main meat part.
+        # now we handle each op individually.
+        if op == 'add':  # add output to channel.
+            teamid = self._teamnametoid(optarg)  # validated above.
+            self.channels.setdefault(optchannel, set()).add(teamid)  # add it.
+            self._savepickle()  # save.
+            irc.reply("I have added {0} into {1}".format(optarg, optchannel))
+        elif op == 'list':  # list channels
+            if len(self.channels) == 0:  # no channels.
+                irc.reply("ERROR: I have no active channels defined. Please use the hardballchannel add operation to add a channel.")
+            else:   # we do have channels.
+                for (k, v) in self.channels.items():  # iterate through and output
+                    irc.reply("{0} :: {1}".format(k, " | ".join([self._teams(team=q) for q in v])))
+        elif op == 'del':  # delete an item from channels.
+            teamid = self._teamnametoid(optarg)
+            if teamid in self.channels[optchannel]:  # id is already in.
+                self.channels[optchannel].remove(teamid)  # remove it.
+                self._savepickle()  # save it.
+                irc.reply("I have successfully removed {0} from {1}".format(optarg, optchannel))
+            else:
+                irc.reply("ERROR: I do not have {0} in {1}".format(optarg, optchannel))
+
+    hardballchannel = wrap(hardballchannel, [('checkCapability', 'admin'), ('somethingWithoutSpaces'), optional('channel'), optional('somethingWithoutSpaces')])
+
     def mlbgamestatus(self, irc, msg, args):
         """."""
 
@@ -650,7 +679,8 @@ class Hardball(callbacks.Plugin):
 
     mlbgamestatus = wrap(mlbgamestatus)
 
-    def mlbgames(self, irc, msg, args):
+    #def mlbgames(self, irc, msg, args):
+    def checkhardball(self, irc):
         """Main handling function."""
 
         # first, we need a baseline set of games.
@@ -668,7 +698,7 @@ class Hardball(callbacks.Plugin):
         # next, before we even compare, we should see if there is a backoff time.
         if self.nextcheck:  # if present. should only be set when we know something in the future.
             if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
-                irc.reply("NEXT CHECK IS: {0} - NOW IS {1} - SECONDS AWAY: {2}".format(self.nextcheck, utcnow, (self.nextcheck-utcnow)))
+                self.log.info("NEXT CHECK IS: {0} - NOW IS {1} - SECONDS AWAY: {2}".format(self.nextcheck, utcnow, (self.nextcheck-utcnow)))
                 return  # bail.
             else:  # we are past when we should be holding off checking.
                 self.nextcheck = None  # reset nextcheck and continue.
@@ -701,34 +731,26 @@ class Hardball(callbacks.Plugin):
         for i, ev in enumerate(games1):
             # scoring change events.
             if (ev['awayscore'] != games2[i]['awayscore']) or (ev['homescore'] != games2[i]['homescore']):
-                self.log.info("ev: {0}".format(ev))
-                self.log.info("games2: {0}".format(games2[i]))
                 # bot of 9th or above. (WALKOFF) (inning = 17+ (Bot 9th), homescore changes and is > than away.
                 if (int(games2[i]['inning']) > 16) and (ev['homescore'] != games2[i]['homescore']) and (games2[i]['homescore'] > games2[i]['awayscore']):
                     message = "{0} - {1}".format(self._gamescore(games2[i]), ircutils.bold(ircutils.underline("WALK-OFF")))
-                    irc.reply("{0}".format(message))
                     self._post(irc, ev['awayt'], ev['homet'], message)
                 else:  # regular scoring event.
                     message = self._gamescore(games2[i])
-                    irc.reply(message)
                     self._post(irc, ev['awayt'], ev['homet'], message)
             # game status change.
             if ev['status'] != games2[i]['status']:  # F = finished, O = PPD, D = Delay, S = Future
                 if ev['status'] == 'S' and games2[i]['status'] == 'P':  # game starts.
                     message = self._gamestart(games2[i])
-                    irc.reply(message)
                     self._post(irc, ev['awayt'], ev['homet'], message)
                 elif ev['status'] == "P" and games2[i]['status'] == 'F':  # game finishes.
                     message = self._gameend(games2[i])
-                    irc.reply(message)
                     self._post(irc, ev['awayt'], ev['homet'], message)
                 elif (ev['status'] in ('P', 'S')) and games2[i]['status'] == 'D':  # game goes into delay.
                     message = self._delaystart(games2[i])
-                    irc.reply(message)
                     self._post(irc, ev['awayt'], ev['homet'], message)
                 elif ev['status'] in 'D' and games2[i]['status'] == 'P':  # game comes out of delay.
                     message = self._delayend(games2[i])
-                    irc.reply(message)
                     self._post(irc, ev['awayt'], ev['homet'], message)
             # no hitter. check after top of 6th (10) inning.
             if ev['inning'] > 9 and (ev['homehits'] == '0' or ev['awayhits'] == '0'):
@@ -740,11 +762,9 @@ class Hardball(callbacks.Plugin):
                     # now handle which pitcher.
                     if games2[i]['homehits'] == '0':  # away pitcher no-hitter.
                         message = self._gamenohit(ev['awaypit'])
-                        irc.reply("{0}@{1} - {2} - {3}".format(at, ht, inning, message))
                         self._post(irc, ev['awayt'], ev['homet'], message)
                     if games2[i]['awayhits'] == '0':  # home pitcher no hitter.
                         message = self._gamenohit(ev['homepit'])
-                        irc.reply("{0}@{1} - {2} - {3}".format(at, ht, inning, message))
                         self._post(irc, ev['awayt'], ev['homet'], message)
 
         # last, before we reset to check again, we need to verify some states of games in order to set sentinel or not.
@@ -753,24 +773,24 @@ class Hardball(callbacks.Plugin):
         # next, check what the statuses of those games are and act accordingly.
         #if any(z in gamestatuses for z in ('D', 'P')):  # at least one is being played or in delay. act normal.
         if ('D' in gamestatuses) or ('P' in gamestatuses):  # if any games are being played or in a delay, act normal.
-            irc.reply("We have at least one game in delay or play so we're acting as normal without any delay.")
+            self.log.info("We have at least one game in delay or play so we're acting as normal without any delay.")
             self.nextcheck = None  # set to None to make sure we're checking on normal time.
         elif 'S' in gamestatuses:  # we have games in the future.
             # this status happens when no games are being played or in delay but not all are final (ie day game and later night).
             firstgametime = sorted([f['start'] for f in games2 if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
             if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
                 self.nextcheck = firstgametime  # set to the "first" game with 'S'.
-                irc.reply("We have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
+                self.log.info("We have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
             else:  # time is not in the future. not sure why but we bail so we're not using a stale nextcheck.
                 self.nextcheck = None
-                irc.reply("We have games in the future (S) but the firstgametime I got was NOT in the future".format(firstgametime))
+                self.log.info("We have games in the future (S) but the firstgametime I got was NOT in the future".format(firstgametime))
         else:  # everything is "F" (Final). we want to backoff so we're not flooding.
             self.nextcheck = utcnow+600  # 10 minutes from now.
-            irc.reply("No active games and I have not got new games yet, so I am holding off for 10 minutes.")
+            self.log.info("No active games and I have not got new games yet, so I am holding off for 10 minutes.")
         # last, change self.games over to our last processed games (games2).
         self.games = games2  # change status.
 
-    mlbgames = wrap(mlbgames)
+    #mlbgames = wrap(mlbgames)
 
 Class = Hardball
 
