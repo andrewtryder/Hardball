@@ -606,7 +606,7 @@ class Hardball(callbacks.Plugin):
         except KeyError:
             irc.reply("The hardball checker was not running.")
         else:
-            irc.reply("Reddit checker stopped.")
+            irc.reply("Hardball checker stopped.")
 
     hardballstop = wrap(hardballstop, [('checkCapability', 'admin')])
 
@@ -737,6 +737,7 @@ class Hardball(callbacks.Plugin):
                     self._post(irc, ev['awayt'], ev['homet'], message)
                 else:  # regular scoring event.
                     message = self._gamescore(games2[i])
+                    self.log.info("SHOULD BE POSTING: {0}".format(message))
                     self._post(irc, ev['awayt'], ev['homet'], message)
             # game status change.
             if ev['status'] != games2[i]['status']:  # F = finished, O = PPD, D = Delay, S = Future
@@ -755,10 +756,6 @@ class Hardball(callbacks.Plugin):
             # no hitter. check after top of 6th (10) inning.
             if ev['inning'] > 9 and (ev['homehits'] == '0' or ev['awayhits'] == '0'):
                 if ev['inning'] != games2[i]['inning']:  # post on inning change ONLY.
-                    # grab our teams and inning first.
-                    at = self._teams(team=ev['awayt'])
-                    ht = self._teams(team=ev['homet'])
-                    inning = self._inningscalc(games2[i]['inning'])
                     # now handle which pitcher.
                     if games2[i]['homehits'] == '0':  # away pitcher no-hitter.
                         message = self._gamenohit(ev['awaypit'])
