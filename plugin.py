@@ -364,6 +364,7 @@ class Hardball(callbacks.Plugin):
                                 (?P<wp>wild\spitch.*?)|
                                 (?P<fe>fielding\serror.*?)|
                                 (?P<grd>ground\srule\sdouble.*?)|
+                                (?P<fc>fielder\'s\schoice.*?)|
                                 (?P<error>.*?error\,.*?)
                                 )$  # END.
                                 """, re.VERBOSE)
@@ -395,6 +396,7 @@ class Hardball(callbacks.Plugin):
                         ## Carlos Pena reaches on a force attempt, throwing error by first baseman Mitch Moreland. 1 run scores.
                         ## [6621] safe at first on first baseman [8772]'s throwing error, [8635] scored, [8640] to second
                         ## [7746] safe at first on third baseman [8624]'s throwing error, [8968] scored, [6679] to third
+                        ## Guillermo Quiroz S: reached on fielder's choice, [8795] scored
                         if srmatch == 'single':
                             rbitext = "RBI {0}".format(srmatch)
                         if srmatch in ('double', 'triple'):
@@ -422,6 +424,9 @@ class Hardball(callbacks.Plugin):
                         elif srmatch == 'grd':
                             runs = self._runmatchtext(srmatchtext)
                             rbitext = "ground rule double. {0} run(s) score".format(runs)
+                        elif srmatch == 'fc':
+                            runs = self._runmatchtext(srmatchtext)
+                            rbitext = "fielder's choice. {0} run(s) score".format(runs)
                         elif srmatch == 'error':
                             outtext = srmatchtext.split(',')[0]  # everything before the comma.
                             outtext = re.sub('\[(\d+)\]', lambda m: self._yahooplayerwrapper(m.group(1)), outtext)  # replace.
@@ -733,7 +738,7 @@ class Hardball(callbacks.Plugin):
             # scoring change events.
             if (ev['awayscore'] != games2[i]['awayscore']) or (ev['homescore'] != games2[i]['homescore']):
                 # bot of 9th or above. (WALKOFF) (inning = 17+ (Bot 9th), homescore changes and is > than away.
-                if (int(games2[i]['inning']) > 16) and (ev['homescore'] != games2[i]['homescore']) and (games2[i]['homescore'] > games2[i]['awayscore']):
+                if ((int(games2[i]['inning']) > 16) and (ev['homescore'] != games2[i]['homescore']) and (int(games2[i]['homescore']) > int(games2[i]['awayscore']))):
                     message = "{0} - {1}".format(self._gamescore(games2[i]), ircutils.bold(ircutils.underline("WALK-OFF")))
                     self._post(irc, ev['awayt'], ev['homet'], message)
                 else:  # regular scoring event.
