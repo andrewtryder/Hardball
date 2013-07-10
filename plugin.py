@@ -423,7 +423,8 @@ class Hardball(callbacks.Plugin):
                             runs = self._runmatchtext(srmatchtext)
                             rbitext = "ground rule double. {0} run(s) score".format(runs)
                         elif srmatch == 'error':
-                            outtext = srmatchtext.split(',')[0]
+                            outtext = srmatchtext.split(',')[0]  # everything before the comma.
+                            outtext = re.sub('\[(\d+)\]', lambda m: self._yahooplayerwrapper(m.group(1)), outtext)  # replace.
                             runs = self._runmatchtext(srmatchtext)
                             rbitext = "{0}. {1} run scores.".format(outtext, runs)
                     else:  # scoring regex did not match we output and log.
