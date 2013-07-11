@@ -117,11 +117,9 @@ class Hardball(callbacks.Plugin):
         # we do have channels. lets go and check where to put what.
         teamids = [awayid, homeid, '0'] # append 0 so we output. needs to be strings.
         postchans = [k for (k, v) in self.channels.items() if __builtins__['any'](z in v for z in teamids)]
-        self.log.info("POSTCHANS: {0}".format(postchans))
         # iterate over each.
         for postchan in postchans:
             try:
-                self.log.info("POSTCHAN: {0}".format(postchan))
                 irc.queueMsg(ircmsgs.privmsg(postchan, message))
             except Exception as e:
                 self.log.error("ERROR: Could not send {0} to {1}. {2}".format(message, postchan, e))
@@ -213,7 +211,6 @@ class Hardball(callbacks.Plugin):
         headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
         try:
              html = utils.web.getUrl(url, headers=headers)
-             self.log.info("Trying to _fetchgames.")
         except Exception, e:
             self.log.error("ERROR: Could not fetch {0} :: {1}".format(url, e))
             return None
@@ -687,13 +684,11 @@ class Hardball(callbacks.Plugin):
         # next, before we even compare, we should see if there is a backoff time.
         if self.nextcheck:  # if present. should only be set when we know something in the future.
             if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
-                self.log.info("NEXT CHECK IS: {0} - NOW IS {1} - SECONDS AWAY: {2}".format(self.nextcheck, utcnow, (self.nextcheck-utcnow)))
                 return  # bail.
             else:  # we are past when we should be holding off checking.
                 self.nextcheck = None  # reset nextcheck and continue.
 
         # now, we must grab new games. if something goes wrong or there are None, we bail.
-        self.log.info("Fetching new games for games2.")
         games2 = self._fetchgames()
         if not games2:  # if something went wrong, we bail.
             self.log.error("ERROR: I was unable to get new games.")
@@ -759,7 +754,6 @@ class Hardball(callbacks.Plugin):
         # next, check what the statuses of those games are and act accordingly.
         #if any(z in gamestatuses for z in ('D', 'P')):  # at least one is being played or in delay. act normal.
         if ('D' in gamestatuses) or ('P' in gamestatuses):  # if any games are being played or in a delay, act normal.
-            self.log.info("We have at least one game in delay or play so we're acting as normal without any delay.")
             self.nextcheck = None  # set to None to make sure we're checking on normal time.
         elif 'S' in gamestatuses:  # we have games in the future.
             # this status happens when no games are being played or in delay but not all are final (ie day game and later night).
