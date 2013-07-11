@@ -117,10 +117,11 @@ class Hardball(callbacks.Plugin):
         # we do have channels. lets go and check where to put what.
         teamids = [awayid, homeid, '0'] # append 0 so we output. needs to be strings.
         postchans = [k for (k, v) in self.channels.items() if __builtins__['any'](z in v for z in teamids)]
+        self.log.info("POSTCHANS: {0}".format(postchans))
         # iterate over each.
         for postchan in postchans:
             try:
-                # self.log.info("sending {0} to {1}".format(postchan, message))
+                self.log.info("POSTCHAN: {0}".format(postchan))
                 irc.queueMsg(ircmsgs.privmsg(postchan, message))
             except Exception as e:
                 self.log.error("ERROR: Could not send {0} to {1}. {2}".format(message, postchan, e))
@@ -578,10 +579,6 @@ class Hardball(callbacks.Plugin):
             message = "pitcher has no hitter."
         return message
 
-    ##########
-    # PUBLIC #
-    ##########
-
     #############################
     # PUBLIC CHANNEL OPERATIONS #
     #############################
@@ -670,20 +667,6 @@ class Hardball(callbacks.Plugin):
                 irc.reply("ERROR: I do not have {0} in {1}".format(optarg, optchannel))
 
     hardballchannel = wrap(hardballchannel, [('checkCapability', 'admin'), ('somethingWithoutSpaces'), optional('channel'), optional('somethingWithoutSpaces')])
-
-    def mlbgamestatus(self, irc, msg, args):
-        """."""
-
-        if len(self.channels) != 0:
-            irc.reply("CHANNELS: {0}".format(self.channels))
-
-        if self.games:
-            irc.reply("NEXTCHECK: {0}".format(self.nextcheck))
-            irc.reply(self.games)
-        else:
-            irc.reply("Nothing in self.games")
-
-    mlbgamestatus = wrap(mlbgamestatus)
 
     #def mlbgames(self, irc, msg, args):
     def checkhardball(self, irc):
