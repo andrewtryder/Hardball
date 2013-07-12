@@ -343,7 +343,6 @@ class Hardball(callbacks.Plugin):
         else:  # now grab the last and process.
             lastline = scorelines[-1]  # grab the last item in scorelines list.
             ev = lastline[6]  # event is always at 6.
-            self.log.info(str(ev))
             # our approach below is to split the event by two parts. the first is always the RBI player.
             # the second is mixed: it's either a 'scoring' event or a homerun. we regex each.
             # line handles splitting these into either. sregex handles different scoring events using named groups.
@@ -721,7 +720,6 @@ class Hardball(callbacks.Plugin):
                     self._post(irc, ev['awayt'], ev['homet'], message)
                 else:  # regular scoring event.
                     message = self._gamescore(games2[i])
-                    self.log.info("SHOULD BE POSTING: {0}".format(message))
                     self._post(irc, ev['awayt'], ev['homet'], message)
             # game status change.
             if ev['status'] != games2[i]['status']:  # F = finished, O = PPD, D = Delay, S = Future
