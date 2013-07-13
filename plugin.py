@@ -433,7 +433,7 @@ class Hardball(callbacks.Plugin):
                     else:  # scoring regex did not match we output and log.
                         self.log.error("ERROR: scoringregex did not match anything in {0}".format(ev))
                         rbitext = re.sub('\[(\d+)\]', lambda m: self._yahooplayerwrapper(m.group(1)), s)  # replace [\d+] w/player.
-                        rbitext = "S: {0}".format(s)
+                        rbitext = "S: {0}".format(rbitext)
                 # now, we need to reconstruct things for output. p = player, inning, rbitext = text from above.
                 player = self._yahooplayerwrapper(m.group('p'))  # translate player # into player.
                 inning = self._inningscalc(int(lastline[3]))  # get inning from ev line.
