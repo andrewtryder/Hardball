@@ -350,7 +350,7 @@ class Hardball(callbacks.Plugin):
             lineregex = re.compile(r'^\[(?P<p>\d+)\]\s((?P<h>homered.*?)|(?P<s>.*?))$')
             sregex = re.compile(r"""
                                 (  # START.
-                                (?P<single>singled.*?)|
+                                (?P<single>single.*?)|
                                 (?P<double>doubled.*?)|
                                 (?P<triple>tripled.*?)|
                                 (?P<go>grounded.*?)|
@@ -394,6 +394,7 @@ class Hardball(callbacks.Plugin):
                         ## [6621] safe at first on first baseman [8772]'s throwing error, [8635] scored, [8640] to second
                         ## [7746] safe at first on third baseman [8624]'s throwing error, [8968] scored, [6679] to third
                         ## Guillermo Quiroz S: reached on fielder's choice, [8795] scored
+                        ## Desmond Jennings S: reached on bunt single to first, [7938] scored
                         if srmatch == 'single':
                             rbitext = "RBI {0}".format(srmatch)
                         if srmatch in ('double', 'triple'):
