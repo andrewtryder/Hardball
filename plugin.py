@@ -565,14 +565,19 @@ class Hardball(callbacks.Plugin):
             msg = "{0} {1} @ {2} {3}".format(at, ev['awayscore'], ht, ev['homescore'])
         return msg
 
-    def _gamenohit(self, pid):
+    def _gamenohit(self, ev, pid):
         """Formats a player-id for a no-hitter."""
 
+        at = self._teams(team=ev['awayt'])  # translate awayteam.
+        ht = self._teams(team=ev['homet'])  # translate hometeam.
+        inning = self._inningscalc(ev['inning'])  # translate inning.
+        # now we see if we can fetch our player.
         player = self._yahooplayer(pid)  # try to fetch playername.
         if player:  # if we get player back.
-            message = "{0} has a no hitter.".format(player)
+            message = "{0}@{1} - {2} - {0} has a no hitter going.".format(at, ht, inning, player)
         else:  # no player.
-            message = "pitcher has no hitter."
+            message = "{0}@{1} - {2} - pitcher has a no hitter going.".format(at, ht, inning)
+
         return message
 
     #############################
@@ -740,10 +745,10 @@ class Hardball(callbacks.Plugin):
                 if ev['inning'] != games2[i]['inning']:  # post on inning change ONLY.
                     # now handle which pitcher.
                     if games2[i]['homehits'] == '0':  # away pitcher no-hitter.
-                        message = self._gamenohit(ev['awaypit'])
+                        message = self._gamenohit(games2[i], ev['awaypit'])
                         self._post(irc, ev['awayt'], ev['homet'], message)
                     if games2[i]['awayhits'] == '0':  # home pitcher no hitter.
-                        message = self._gamenohit(ev['homepit'])
+                        message = self._gamenohit(games2[i], ev['homepit'])
                         self._post(irc, ev['awayt'], ev['homet'], message)
 
         # last, before we reset to check again, we need to verify some states of games in order to set sentinel or not.
