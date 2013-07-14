@@ -511,6 +511,14 @@ class Hardball(callbacks.Plugin):
         msg = "{0}@{1} - {2} - {3}".format(at, ht, inning, status)
         return msg
 
+    def _gameextras(self, ev):
+        """Game is going to extras."""
+
+        at = self._teams(team=ev['awayt'])  # translate awayteam.
+        ht = self._teams(team=ev['homet'])  # translate hometeam.
+        msg = "{0} {1} @ {2} {3} - Going to extra innings.".format(at, ev['awayscore'], ht, ev['homescore'])
+        return msg
+
     def _gamestart(self, ev):
         """Format a gamestring for output for game starting."""
 
@@ -727,6 +735,10 @@ class Hardball(callbacks.Plugin):
                 else:  # regular scoring event.
                     message = self._gamescore(games2[i])
                     self._post(irc, ev['awayt'], ev['homet'], message)
+            # game is going to extras.
+            if (ev['inning'] == 17 and games2[i]['inning'] == 18):  # post on inning change ONLY.
+                message = self._gameextras(games2[i])
+                self._post(irc, ev['awayt'], ev['homet'], message)
             # game status change.
             if ev['status'] != games2[i]['status']:  # F = finished, O = PPD, D = Delay, S = Future
                 if ev['status'] == 'S' and games2[i]['status'] == 'P':  # game starts.
