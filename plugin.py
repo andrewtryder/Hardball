@@ -353,7 +353,7 @@ class Hardball(callbacks.Plugin):
                                 (?P<single>single.*?)|
                                 (?P<double>doubled.*?)|
                                 (?P<triple>tripled.*?)|
-                                (?P<go>grounded.*?)|
+                                (?P<go>((grounded.*?)|(sacrificed to.*?)))|
                                 (?P<sf>hit\ssacrifice.*?)|
                                 (?P<walks>walked.*?)|
                                 (?P<hbp>hit\sby\spitch.*?)|
@@ -389,12 +389,13 @@ class Hardball(callbacks.Plugin):
                         srmatchtext = sr.group(srmatch)  # grab the dict (value) with the matching text.
                         # now, we conditionally handle events based on named groups in the regex from above.
                         # it should blowup if something doesn't match, in which case I'll fix.
-                        ## FIX
+                        ## FIX REGEXES:
                         ## Carlos Pena reaches on a force attempt, throwing error by first baseman Mitch Moreland. 1 run scores.
                         ## [6621] safe at first on first baseman [8772]'s throwing error, [8635] scored, [8640] to second
                         ## [7746] safe at first on third baseman [8624]'s throwing error, [8968] scored, [6679] to third
-                        ## Guillermo Quiroz S: reached on fielder's choice, [8795] scored
-                        ## Desmond Jennings S: reached on bunt single to first, [7938] scored
+                        ## FIXED
+                        ## Desmond Jennings S: reached on bunt single to first, [7938] scored -- assigned to single.
+                        ## [9046] sacrificed to pitcher, [9234] scored, [9094] to second -- assigned to go.
                         if srmatch == 'single':
                             rbitext = "RBI {0}".format(srmatch)
                         if srmatch in ('double', 'triple'):
