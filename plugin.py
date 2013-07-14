@@ -572,8 +572,8 @@ class Hardball(callbacks.Plugin):
         at = self._teams(team=ev['awayt'])  # translate awayteam.
         ht = self._teams(team=ev['homet'])  # translate hometeam.
         inning = self._inningscalc(ev['inning'])  # translate inning.
-        # now we see if we can fetch our player.
         player = self._yahooplayer(pid)  # try to fetch playername.
+        # figure out output.
         if player:  # if we get player back.
             message = "{0}@{1} - {2} - {3} {4}".format(at, ht, inning, ircutils.bold(player), ircutils.bold("has a no hitter going."))
         else:  # no player.
