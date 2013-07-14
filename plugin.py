@@ -575,9 +575,9 @@ class Hardball(callbacks.Plugin):
         # now we see if we can fetch our player.
         player = self._yahooplayer(pid)  # try to fetch playername.
         if player:  # if we get player back.
-            message = "{0}@{1} - {2} - {3} has a no hitter going.".format(at, ht, inning, player)
+            message = "{0}@{1} - {2} - {3} {4}".format(at, ht, inning, ircutils.bold(player), ircutils.bold("has a no hitter going."))
         else:  # no player.
-            message = "{0}@{1} - {2} - pitcher has a no hitter going.".format(at, ht, inning)
+            message = "{0}@{1} - {2} - {3}".format(at, ht, inning, ircutils.bold("pitcher has a no hitter going."))
 
         return message
 
