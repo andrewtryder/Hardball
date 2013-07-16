@@ -168,7 +168,8 @@ class Hardball(callbacks.Plugin):
                  '7':'KC', '8':'MIL', '9':'MIN', '10':'NYY', '11':'OAK', '12':'SEA',
                  '13':'TEX', '14':'TOR', '15':'ATL', '16':'CHC', '17':'CIN', '18':'HOU',
                  '19':'LAD', '20':'WSH', '21':'NYM', '22':'PHI', '23':'PIT', '24':'STL',
-                 '25':'SD', '26':'SF', '27':'COL', '28':'MIA', '29':'ARI', '30':'TB'}
+                 '25':'SD', '26':'SF', '27':'COL', '28':'MIA', '29':'ARI', '30':'TB',
+                 '31':'AL', '32':'NL'}
         # return
         if team:  # if we got a team.
             if team in table:  # if we get a valid #, return the team.
@@ -685,11 +686,11 @@ class Hardball(callbacks.Plugin):
 
         # first, we need a baseline set of games.
         if not self.games:  # we don't have them if reloading.
-            self.log.info("I do not have any games. Fetching initial games.")
+            self.log.info("checkhardball: I do not have any games. Fetching initial games.")
             self.games = self._fetchgames()
         # verify we have a baseline.
         if not self.games:  # we don't. must bail.
-            self.log.error("ERROR: I do not have any games in self.games.")
+            self.log.error("checkhardball: I do not have any games in self.games.")
             return
         else:  # setup the baseline stuff.
             games1 = self.games  # games to compare from.
@@ -705,20 +706,20 @@ class Hardball(callbacks.Plugin):
         # now, we must grab new games. if something goes wrong or there are None, we bail.
         games2 = self._fetchgames()
         if not games2:  # if something went wrong, we bail.
-            self.log.error("ERROR: I was unable to get new games.")
+            self.log.error("checkhardball: I was unable to get new games.")
             return
 
         # before we get to the main money, we need to make sure that game1 and game2 can be compared.
         # compare the start times between the two. we can also try gameids but these look to be identical.
         i1 = set([i['start'] for i in games1])  # set for intersection.
         if not len(i1.difference([i['start'] for i in games2])) == 0:  # this is true if they are different.
-            self.log.info("games1 and games2 have different gameids.")
+            self.log.info("checkhardball: games1 and games2 have different gameids.")
             # to verify, we also want to make sure all 'new' games are inactive.
             if len([i for i in games2 if i['status'] == "P"]) == 0:  # no new games are active. (new games/days)
-                self.log.info("No new games in games2. We'll find the first game time and reset.")
+                self.log.info("checkhardball: no new games in games2. we'll find the first game time and reset.")
                 firstgametime = sorted(games2, key=itemgetter('start'), reverse=False)[0]  # find first game in new.
                 if firstgametime['start'] > utcnow:  # make sure it starts after now and is not stale.
-                    self.log.info("Setting next check at: {0}".format(firstgametime['start']))
+                    self.log.info("checkhardball: setting next check at: {0}".format(firstgametime['start']))
                     self.nextcheck = firstgametime['start']  # set and bail.
                     self.games = games2  # reset.
                     return  # bail.
@@ -777,13 +778,13 @@ class Hardball(callbacks.Plugin):
             firstgametime = sorted([f['start'] for f in games2 if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
             if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
                 self.nextcheck = firstgametime  # set to the "first" game with 'S'.
-                self.log.info("We have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
+                self.log.info("checkhardball: we have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
             else:  # time is not in the future. not sure why but we bail so we're not using a stale nextcheck.
                 self.nextcheck = None
-                self.log.info("We have games in the future (S) but the firstgametime I got was NOT in the future".format(firstgametime))
+                self.log.info("checkhardball: we have games in the future (S) but the firstgametime I got was NOT in the future".format(firstgametime))
         else:  # everything is "F" (Final). we want to backoff so we're not flooding.
             self.nextcheck = utcnow+600  # 10 minutes from now.
-            self.log.info("No active games and I have not got new games yet, so I am holding off for 10 minutes.")
+            self.log.info("checkhardball: no active games and I have not got new games yet, so I am holding off for 10 minutes.")
         # last, change self.games over to our last processed games (games2).
         self.games = games2  # change status.
 
