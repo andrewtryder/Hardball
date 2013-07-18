@@ -696,13 +696,14 @@ class Hardball(callbacks.Plugin):
         # next, before we even compare, we should see if there is a backoff time.
         if self.nextcheck:  # if present. should only be set when we know something in the future.
             self.log.info("we have nextcheck.")
-            utcnow = self._utcnow()
+            utcnow = self._utcnow()  # grab UTC now.
             if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
-                self.log.info("checkhardball: nextcheck is in the future ({0}).".format(nextcheck-utcnow))
+                self.log.info("checkhardball: nextcheck is in the future")
                 return  # bail.
             else:  # we are past when we should be holding off checking.
                 self.log.info("checkhardball: past nextcheck time so we're resetting it.")
                 self.nextcheck = None  # reset nextcheck and continue.
+            self.log.info("exiting nextcheck.")
         # first, we need a baseline set of games.
         if not self.games:  # we don't have them if reloading.
             self.log.info("checkhardball: I do not have any games. Fetching initial games.")
