@@ -132,7 +132,7 @@ class Hardball(callbacks.Plugin):
         """Load channel data from pickle."""
 
         try:
-            datafile = open(conf.supybot.directories.data.dirize("Hardball.pickle"), 'rb')
+            datafile = open(conf.supybot.directories.data.dirize(self.name()+".pickle"), 'rb')
             try:
                 dataset = pickle.load(datafile)
             finally:
@@ -148,7 +148,7 @@ class Hardball(callbacks.Plugin):
 
         data = {"channels": self.channels}
         try:
-            datafile = open(conf.supybot.directories.data.dirize("Hardball.pickle"), 'wb')
+            datafile = open(conf.supybot.directories.data.dirize(self.name()+".pickle"), 'wb')
             try:
                 pickle.dump(data, datafile)
             finally:
@@ -210,10 +210,9 @@ class Hardball(callbacks.Plugin):
 
         url = b64decode('aHR0cDovL2F1ZDEyLnNwb3J0cy5hYzQueWFob28uY29tL21sYi9nYW1lcy50eHQ=')
         headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
-        try:
-             html = utils.web.getUrl(url, headers=headers)
-        except Exception, e:
-            self.log.error("ERROR: Could not fetch {0} :: {1}".format(url, e))
+        html = self._httpget(url, h=headers)
+        if not html:
+            self.log.error("ERROR: _fetchgames: could not fetch {0} :: {1}".format(url, e))
             return None
         # now turn the "html" into a list of dicts.
         newgames = self._txttodict(html)
@@ -226,12 +225,13 @@ class Hardball(callbacks.Plugin):
         """Games game lines from fetchgames and turns them into a list of dicts."""
 
         lines = txt.splitlines()
-        games = []
+        games = {}
         # iterate over.
         for i, line in enumerate(lines):
             if line.startswith('g|'):  # only games.
                 concatline = "%s|%s" % (line, lines[i+1])  # +o|gid
                 cclsplit = concatline.split('|')  # split.
+                mlbid = int(cclsplit[1])  # key.
                 t = {}  # dict to put all values in.
                 t['awayt'] = cclsplit[4]
                 t['homet'] = cclsplit[5]
@@ -245,11 +245,15 @@ class Hardball(callbacks.Plugin):
                 t['homehits'] = cclsplit[17]
                 t['homepit'] = cclsplit[19]
                 t['gameid'] = cclsplit[30]
-                games.append(t)
+                games[mlbid] = t
         # process if we have games or not.
         if len(games) == 0:  # no games.
-            self.log.error("ERROR: No matching lines in _txttodict")
+            self.log.error("ERROR: _txttodict: no games found.")
             self.log.error("ERROR: _txttodict: {0}".format(txt))
+            # this always means we have no games like the ASB.
+            # worst case, it means that something imploded above and needs manual checking and a fix.
+            # we should backoff 1 hr though so we don't hammer the site.
+            self.nextcheck = self._utcnow()+3600
             return None
         else:
             return games
@@ -263,7 +267,10 @@ class Hardball(callbacks.Plugin):
 
         try:
             url = b64decode('aHR0cDovL3Nwb3J0cy55YWhvby5jb20vbWxiL3BsYXllcnMv') + '%s' % (pid)
-            html = utils.web.getUrl(url)
+            html = self._httpget(url)
+            if not html:
+                self.log.error("ERROR: _yahoopid: Could not fetch {0}".format(url))
+                return None
             soup = BeautifulSoup(html)
             pname = soup.find('li', attrs={'class':'player-name'}).getText().encode('utf-8')
             return "{0}".format(pname.strip())
@@ -326,9 +333,8 @@ class Hardball(callbacks.Plugin):
         """Handles scoring event parsing for output."""
 
         url = b64decode('aHR0cDovL2F1ZDEyLnNwb3J0cy5hYzQueWFob28uY29tL21sYi8=') + 'plays-%s.txt' % (gid)
-        try:  # try to fetch plays.
-            html = utils.web.getUrl(url)
-        except Exception, e:
+        html = self._httpget(url)
+        if not html:
             self.log.error("ERROR: Could not gameevfetch: {0} :: {1}".format(gid, e))
             return None
         # process the lines.
@@ -450,8 +456,9 @@ class Hardball(callbacks.Plugin):
         """Handle final event stuff."""
 
         url = b64decode('aHR0cDovL2F1ZDEyLnNwb3J0cy5hYzQueWFob28uY29tL21sYi9nYW1lcy50eHQ=')
-        html = utils.web.getUrl(url)
+        html = self._httpget(url)
         if not html:  # bail if we have nothing.
+            self.log.error("ERROR: _yahoofinal. I could not fetch for gid: %s" % gid)
             return None
         # now that we have the html, try and find the line we need.
         endgame = re.search('^(z\|'+gid+'\|.*?)$', html, re.M|re.S)
@@ -462,7 +469,7 @@ class Hardball(callbacks.Plugin):
         endline = endgame.group(1)
         fields = re.search('^z\|\d+\|(?P<losing>\d+)\|(?P<winning>\d+)\|(?P<save>\d+)$', endline)
         if not fields:  # if, for some reason, the fields don't match.
-            self.log.error("ERROR: _yahoofinal looking for fields in: %s" % (endline))
+            self.log.error("ERROR: _yahoofinal looking for fields in: %" % (endline))
             return None
         # we do have fields, so lets process them and translate into players.
         if fields:  # fields->pids.
@@ -684,98 +691,83 @@ class Hardball(callbacks.Plugin):
     def checkhardball(self, irc):
         """Main handling function."""
 
+        # next, before we even compare, we should see if there is a backoff time.
+        if self.nextcheck:  # if present. should only be set when we know something in the future.
+            utcnow = self._utcnow()
+            if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
+                return  # bail.
+            else:  # we are past when we should be holding off checking.
+                self.log.info("checkhardball: past nextcheck time so we're resetting it.")
+                self.nextcheck = None  # reset nextcheck and continue.
         # first, we need a baseline set of games.
         if not self.games:  # we don't have them if reloading.
             self.log.info("checkhardball: I do not have any games. Fetching initial games.")
             self.games = self._fetchgames()
         # verify we have a baseline.
         if not self.games:  # we don't. must bail.
-            self.log.error("checkhardball: I do not have any games in self.games.")
+            self.log.error("checkhardball: after second try, I could not get self.games.")
             return
-        else:  # setup the baseline stuff.
+        else:  # we have games. setup the baseline stuff.
             games1 = self.games  # games to compare from.
-            utcnow = self._utcnow()
-
-        # next, before we even compare, we should see if there is a backoff time.
-        if self.nextcheck:  # if present. should only be set when we know something in the future.
-            if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
-                return  # bail.
-            else:  # we are past when we should be holding off checking.
-                self.nextcheck = None  # reset nextcheck and continue.
-
         # now, we must grab new games. if something goes wrong or there are None, we bail.
         games2 = self._fetchgames()
         if not games2:  # if something went wrong, we bail.
-            self.log.error("checkhardball: I was unable to get new games.")
+            self.log.error("checkhardball: I was unable to get new games2.")
             return
 
-        # before we get to the main money, we need to make sure that game1 and game2 can be compared.
-        # compare the start times between the two. we can also try gameids but these look to be identical.
-        i1 = set([i['start'] for i in games1])  # set for intersection.
-        if not len(i1.difference([i['start'] for i in games2])) == 0:  # this is true if they are different.
-            self.log.info("checkhardball: games1 and games2 have different gameids.")
-            # to verify, we also want to make sure all 'new' games are inactive.
-            if len([i for i in games2 if i['status'] == "P"]) == 0:  # no new games are active. (new games/days)
-                self.log.info("checkhardball: no new games in games2. we'll find the first game time and reset.")
-                firstgametime = sorted(games2, key=itemgetter('start'), reverse=False)[0]  # find first game in new.
-                if firstgametime['start'] > utcnow:  # make sure it starts after now and is not stale.
-                    self.log.info("checkhardball: setting next check at: {0}".format(firstgametime['start']))
-                    self.nextcheck = firstgametime['start']  # set and bail.
-                    self.games = games2  # reset.
-                    return  # bail.
+        # main part/main money in the loop. we compare games1 (old) vs. games2 (new) by keys.
+        # looking for differences (events). each event is then handled properly.
+        for (k, v) in games1.items():  # iterate through self.games.
+            if k in games2:  # match up keys because we don't know the frequency of the games/list changing.
+                # scoring change events.
+                if (v['awayscore'] != games2[k]['awayscore']) or (v['homescore'] != games2[k]['homescore']):
+                    # bot of 9th or above. (WALKOFF) (inning = 17+ (Bot 9th), homescore changes and is > than away.
+                    if ((int(games2[k]['inning']) > 16) and (v['homescore'] != games2[k]['homescore']) and (int(games2[k]['homescore']) > int(games2[k]['awayscore']))):
+                        message = "{0} - {1}".format(self._gamescore(games2[k]), ircutils.bold(ircutils.underline("WALK-OFF")))
+                        self._post(irc, v['awayt'], v['homet'], message)
+                    else:  # regular scoring event.
+                        message = self._gamescore(games2[k])
+                        self._post(irc, v['awayt'], v['homet'], message)
+                # game is going to extras.
+                if ((v['inning'] == 17) and (games2[k]['inning'] == 18)):  # post on inning change ONLY.
+                    message = self._gameextras(games2[k])
+                    self._post(irc, v['awayt'], v['homet'], message)
+                # game status change.
+                if (v['status'] != games2[k]['status']):  # F = finished, O = PPD, D = Delay, S = Future
+                    if ((v['status'] == 'S') and (games2[k]['status'] == 'P')):  # game starts.
+                        message = self._gamestart(games2[k])
+                        self._post(irc, v['awayt'], v['homet'], message)
+                    elif ((v['status'] == "P") and (games2[k]['status'] == 'F')):  # game finishes.
+                        message = self._gameend(games2[k])
+                        self._post(irc, v['awayt'], v['homet'], message)
+                    elif ((v['status'] in ('P', 'S')) and (games2[k]['status'] == 'D')):  # game goes into delay.
+                        message = self._delaystart(games2[k])
+                        self._post(irc, v['awayt'], v['homet'], message)
+                    elif ((v['status'] == 'D') and (games2[k]['status'] == 'P')):  # game comes out of delay.
+                        message = self._delayend(games2[k])
+                        self._post(irc, v['awayt'], v['homet'], message)
+                # no hitter. check after top of 6th (10) inning.
+                if ((v['inning'] > 9) and ((v['homehits'] == '0') or (v['awayhits'] == '0'))):
+                    if (v['inning'] != games2[k]['inning']):  # post on inning change ONLY.
+                        # now handle which pitcher.
+                        if (games2[k]['homehits'] == '0'):  # away pitcher no-hitter.
+                            message = self._gamenohit(games2[k], v['awaypit'])
+                            self._post(irc, v['awayt'], v['homet'], message)
+                        if (games2[k]['awayhits'] == '0'):  # home pitcher no hitter.
+                            message = self._gamenohit(games2[k], v['homepit'])
+                            self._post(irc, v['awayt'], v['homet'], message)
 
-        # main part/main money in the loop.
-        # we basically compare games1(old) and games2(new), looking for differences (events)
-        # each event is then handled properly.
-        for i, ev in enumerate(games1):
-            # scoring change events.
-            if (ev['awayscore'] != games2[i]['awayscore']) or (ev['homescore'] != games2[i]['homescore']):
-                # bot of 9th or above. (WALKOFF) (inning = 17+ (Bot 9th), homescore changes and is > than away.
-                if ((int(games2[i]['inning']) > 16) and (ev['homescore'] != games2[i]['homescore']) and (int(games2[i]['homescore']) > int(games2[i]['awayscore']))):
-                    message = "{0} - {1}".format(self._gamescore(games2[i]), ircutils.bold(ircutils.underline("WALK-OFF")))
-                    self._post(irc, ev['awayt'], ev['homet'], message)
-                else:  # regular scoring event.
-                    message = self._gamescore(games2[i])
-                    self._post(irc, ev['awayt'], ev['homet'], message)
-            # game is going to extras.
-            if (ev['inning'] == 17 and games2[i]['inning'] == 18):  # post on inning change ONLY.
-                message = self._gameextras(games2[i])
-                self._post(irc, ev['awayt'], ev['homet'], message)
-            # game status change.
-            if ev['status'] != games2[i]['status']:  # F = finished, O = PPD, D = Delay, S = Future
-                if ev['status'] == 'S' and games2[i]['status'] == 'P':  # game starts.
-                    message = self._gamestart(games2[i])
-                    self._post(irc, ev['awayt'], ev['homet'], message)
-                elif ev['status'] == "P" and games2[i]['status'] == 'F':  # game finishes.
-                    message = self._gameend(games2[i])
-                    self._post(irc, ev['awayt'], ev['homet'], message)
-                elif (ev['status'] in ('P', 'S')) and games2[i]['status'] == 'D':  # game goes into delay.
-                    message = self._delaystart(games2[i])
-                    self._post(irc, ev['awayt'], ev['homet'], message)
-                elif ev['status'] in 'D' and games2[i]['status'] == 'P':  # game comes out of delay.
-                    message = self._delayend(games2[i])
-                    self._post(irc, ev['awayt'], ev['homet'], message)
-            # no hitter. check after top of 6th (10) inning.
-            if ev['inning'] > 9 and (ev['homehits'] == '0' or ev['awayhits'] == '0'):
-                if ev['inning'] != games2[i]['inning']:  # post on inning change ONLY.
-                    # now handle which pitcher.
-                    if games2[i]['homehits'] == '0':  # away pitcher no-hitter.
-                        message = self._gamenohit(games2[i], ev['awaypit'])
-                        self._post(irc, ev['awayt'], ev['homet'], message)
-                    if games2[i]['awayhits'] == '0':  # home pitcher no hitter.
-                        message = self._gamenohit(games2[i], ev['homepit'])
-                        self._post(irc, ev['awayt'], ev['homet'], message)
-
+        # now that we're done checking changes, copy the new into self.games to check against next time.
+        self.games = games2
         # last, before we reset to check again, we need to verify some states of games in order to set sentinel or not.
         # first, we grab all the statuses in newgames (games2)
-        gamestatuses = [i['status'] for i in games2]
+        gamestatuses = set([v['status'] for (k, v) in games2.items()])
         # next, check what the statuses of those games are and act accordingly.
-        #if any(z in gamestatuses for z in ('D', 'P')):  # at least one is being played or in delay. act normal.
-        if ('D' in gamestatuses) or ('P' in gamestatuses):  # if any games are being played or in a delay, act normal.
+        if (('D' in gamestatuses) or ('P' in gamestatuses)):  # if any games are being played or in a delay, act normal.
             self.nextcheck = None  # set to None to make sure we're checking on normal time.
-        elif 'S' in gamestatuses:  # we have games in the future.
-            # this status happens when no games are being played or in delay but not all are final (ie day game and later night).
+        elif 'S' in gamestatuses:  # no games being played or in delay, but we have games in the future. (ie: day games done but night games later)
             firstgametime = sorted([f['start'] for f in games2 if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
+            utcnow = self._utcnow()  # grab UTC now.
             if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
                 self.nextcheck = firstgametime  # set to the "first" game with 'S'.
                 self.log.info("checkhardball: we have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
@@ -785,10 +777,7 @@ class Hardball(callbacks.Plugin):
         else:  # everything is "F" (Final). we want to backoff so we're not flooding.
             self.nextcheck = utcnow+600  # 10 minutes from now.
             self.log.info("checkhardball: no active games and I have not got new games yet, so I am holding off for 10 minutes.")
-        # last, change self.games over to our last processed games (games2).
-        self.games = games2  # change status.
 
-    #mlbgames = wrap(mlbgames)
 
 Class = Hardball
 
