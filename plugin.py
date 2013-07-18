@@ -253,6 +253,7 @@ class Hardball(callbacks.Plugin):
             # this always means we have no games like the ASB.
             # worst case, it means that something imploded above and needs manual checking and a fix.
             # we should backoff 1 hr though so we don't hammer the site.
+            self.log.info("ERROR: _txttodict: I found no games so I am backing off 1 hour.")
             self.nextcheck = self._utcnow()+3600
             return None
         else:
@@ -696,6 +697,7 @@ class Hardball(callbacks.Plugin):
         if self.nextcheck:  # if present. should only be set when we know something in the future.
             utcnow = self._utcnow()
             if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
+                self.log.info("checkhardball: nextcheck is in the future ({0}).".format(nextcheck-utcnow))
                 return  # bail.
             else:  # we are past when we should be holding off checking.
                 self.log.info("checkhardball: past nextcheck time so we're resetting it.")
