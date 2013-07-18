@@ -695,6 +695,7 @@ class Hardball(callbacks.Plugin):
         self.log.info("checkhardball running..")
         # next, before we even compare, we should see if there is a backoff time.
         if self.nextcheck:  # if present. should only be set when we know something in the future.
+            self.log.info("we have nextcheck.")
             utcnow = self._utcnow()
             if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
                 self.log.info("checkhardball: nextcheck is in the future ({0}).".format(nextcheck-utcnow))
