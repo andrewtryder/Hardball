@@ -777,6 +777,7 @@ class Hardball(callbacks.Plugin):
             self.log.info("S in gamestatuses")
             firstgametime = sorted([f['start'] for f in games2 if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
             utcnow = self._utcnow()  # grab UTC now.
+            self.log.info("FIRSTGAMETIME IS {0} UTCNOW IS {1}".format(firstgametime, utcnow))
             if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
                 self.nextcheck = firstgametime  # set to the "first" game with 'S'.
                 self.log.info("checkhardball: we have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
