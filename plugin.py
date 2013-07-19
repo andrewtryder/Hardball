@@ -767,16 +767,23 @@ class Hardball(callbacks.Plugin):
         # last, before we reset to check again, we need to verify some states of games in order to set sentinel or not.
         # first, we grab all the statuses in newgames (games2)
         gamestatuses = set([v['status'] for (k, v) in games2.items()])
+        self.log.info("gamestatuses {0}".format(gamestatuses))
         # next, check what the statuses of those games are and act accordingly.
+        self.log.info("right before our first check")
         if (('D' in gamestatuses) or ('P' in gamestatuses)):  # if any games are being played or in a delay, act normal.
+            self.log.info("D or P in gamestatuses")
             self.nextcheck = None  # set to None to make sure we're checking on normal time.
         elif 'S' in gamestatuses:  # no games being played or in delay, but we have games in the future. (ie: day games done but night games later)
+            self.log.info("S in gamestatuses")
             firstgametime = sorted([f['start'] for f in games2 if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
             utcnow = self._utcnow()  # grab UTC now.
             if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
                 self.nextcheck = firstgametime  # set to the "first" game with 'S'.
                 self.log.info("checkhardball: we have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
-            else:  # time is not in the future. not sure why but we bail so we're not using a stale nextcheck.
+            else:  # firstgametime is NOT in the future. this is a problem.
+                # we should do math here to see "how long" it is.
+                # if it's close like within an hour, standoff should be a minute due to bad times.
+                # if it's more than that, we should holdoff longer.
                 self.nextcheck = None
                 self.log.info("checkhardball: we have games in the future (S) but the firstgametime I got was NOT in the future".format(firstgametime))
         else:  # everything is "F" (Final). we want to backoff so we're not flooding.
