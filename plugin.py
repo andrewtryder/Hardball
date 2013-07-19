@@ -775,7 +775,7 @@ class Hardball(callbacks.Plugin):
             self.nextcheck = None  # set to None to make sure we're checking on normal time.
         elif 'S' in gamestatuses:  # no games being played or in delay, but we have games in the future. (ie: day games done but night games later)
             self.log.info("S in gamestatuses")
-            firstgametime = sorted([f['start'] for f in games2 if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
+            firstgametime = sorted([f['start'] for (i, f) in games2.items() if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
             utcnow = self._utcnow()  # grab UTC now.
             self.log.info("FIRSTGAMETIME IS {0} UTCNOW IS {1}".format(firstgametime, utcnow))
             if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
