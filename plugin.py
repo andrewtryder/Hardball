@@ -250,14 +250,72 @@ class Hardball(callbacks.Plugin):
         if len(games) == 0:  # no games.
             self.log.error("ERROR: _txttodict: no games found.")
             self.log.error("ERROR: _txttodict: {0}".format(txt))
-            # this always means we have no games like the ASB.
-            # worst case, it means that something imploded above and needs manual checking and a fix.
-            # we should backoff 1 hr though so we don't hammer the site.
             self.log.info("ERROR: _txttodict: I found no games so I am backing off 1 hour.")
             self.nextcheck = self._utcnow()+3600
             return None
         else:
             return games
+
+    def _teamrecords(self):
+        """Fetch the table of team records for when a game begins."""
+
+        url = b64decode('aHR0cDovL2F1ZDIxLnNwb3J0cy5hYzQueWFob28uY29t') + '/mlb/teams.txt'
+        headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
+        html = self._httpget(url, h=headers)
+        if not html:
+            self.log.error("ERROR: _teamrecords: could not fetch {0} :: {1}".format(url, e))
+            return None
+        # now split the lines.
+        lines = html.splitlines()
+        if len(lines) == 0:
+            self.log.error("ERROR: _teamrecords could not find any lines in URL.")
+            return None
+        # dict to store everything in.
+        teamlines = {}
+        for line in lines:
+            if line.startswith('t'):  # only t lines.
+                s = line.split('|')
+                #teamlines[s[1]] = "({0}-{1}) (Home: {2}-{3}) (Away {4}-{5})".format(s[6], s[7], s[10], s[11], s[8], s[9])
+                teamlines[s[1]] = "{0}-{1}".format(s[6], s[7])  # make our dict with records.
+        # last, make sure we found stuff.
+        if len(teamlines) == 0:
+            self.log.error("ERROR: _teamrecords something broke making the dict of team records.")
+            return None
+        else:  # everything worked
+            return teamlines
+
+    def _pitchers(self):
+        """Fetch pitcher statlines."""
+
+        url = b64decode('aHR0cDovL2F1ZDIxLnNwb3J0cy5hYzQueWFob28uY29t') + '/mlb/stats.txt'
+        headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
+        html = self._httpget(url, h=headers)
+        if not html:
+            self.log.error("ERROR: _teamrecords: could not fetch {0} :: {1}".format(url, e))
+            return None
+        # now split the lines
+        lines = html.splitlines()
+        if len(lines) == 0:
+            self.log.error("ERROR: _teamrecords could not find any lines in URL.")
+            return None
+        # store in dict so we can access via key.
+        pitchers = {}
+        for line in lines:
+            if line.startswith('k'):  # only k lines.
+                s = line.split('|')
+                # we calculate ERA below.
+                ip = float(s[2])
+                if ip == "0.0":  # special case if ip is 0.
+                    era = "0.00"  # would get divby0 error otherwise.
+                else:  # calculate it if we have otherwise.
+                    era = 9*(int(s[7])/float(ip))  # ERA = 9 × (ER/IP)
+                # inject. key is the pid.
+                pitchers[s[1]] = "{0}-{1}, {2:.2f}".format(s[8], s[9] ,era)
+        # make sure we have something to return.
+        if len(pitchers) == 0:
+            return None
+        else:  # return dict.
+            return pitchers
 
     ##########################
     # YAHOO PLAYER INTERNALS #
@@ -532,15 +590,30 @@ class Hardball(callbacks.Plugin):
     def _gamestart(self, ev):
         """Format a gamestring for output for game starting."""
 
-        at = self._teams(team=ev['awayt'])  # translate awayteam.
-        ht = self._teams(team=ev['homet'])  # translate hometeam.
+        # translate home/awayteam from id -> TEAM
+        at = self._teams(team=ev['awayt'])
+        ht = self._teams(team=ev['homet'])
+        # do the same with the pitchers.
+        awaypit = self._yahooplayerwrapper(ev['awaypit'])
+        homepit = self._yahooplayerwrapper(ev['homepit'])
+        # next section tries to dress up team and pitcher stats.
+        tr = self._teamrecords()  # should return a dict of team records.
+        if tr:  # if we go get it back, manip at/ht
+            if ev['awayt'] in tr:  # make sure key is in dict.
+                at = "{0}({1})".format(at, tr[ev['awayt']])
+            if ev['homet'] in tr:  # also make sure its in there.
+                ht = "{0}({1})".format(ht, tr[ev['homet']])
+        # likewise, we try and find pitcher ERA/records.
+        pr = self._pitchers()  # should return a dict.
+        if pr:  # only manip if we get this back.
+            if ev['awaypit'] in pr:  # check for key membership.
+                awaypit = "{0}({1})".format(awaypit, pr[ev['awaypit']])
+            if ev['homepit'] in pr:  # check for key membership.
+                homepit = "{0}({1})".format(homepit, pr[ev['homepit']])
+        # now format the message for output.
         starting = ircutils.mircColor("Starting", 'green')
-        # try and fetch pitchers.
-        awaypit = self._yahooplayer(ev['awaypit'])
-        homepit = self._yahooplayer(ev['homepit'])
-        # now format the message. if we have pitchers, use.
         if awaypit and homepit:
-            msg = "{0}@{1} ({2} vs. {3}) - T1 - {4}".format(at, ht,  awaypit, homepit, starting)
+            msg = "{0}@{1} - {2} vs {3} - T1 - {4}".format(at, ht,  awaypit, homepit, starting)
         else:
             msg = "{0}@{1} - T1 - {2}".format(at, ht, starting)
         return msg
@@ -638,7 +711,7 @@ class Hardball(callbacks.Plugin):
 
         Add or delete team(s) from a specific channel's output.
         Use team abbreviation for specific teams or ALL for everything. Can only specify one at a time.
-        Ex: #channel1 ALL OR #channel2 NYY
+        Ex: add #channel1 ALL OR add #channel2 NYY OR del #channel1 ALL OR list
         """
 
         # first, lower operation.
@@ -650,7 +723,7 @@ class Hardball(callbacks.Plugin):
             return
         # if we're not doing list (add or del) make sure we have the arguments.
         if op != 'list':
-            if not optchannel and not optarg:  # add|del need these.
+            if not optchannel or not optarg:  # add|del need these.
                 irc.reply("ERROR: add and del operations require a channel and team. Ex: add #channel NYY OR del #channel NYY")
                 return
             # we are doing an add/del op.
@@ -696,7 +769,6 @@ class Hardball(callbacks.Plugin):
         if self.nextcheck:  # if present. should only be set when we know something in the future.
             utcnow = self._utcnow()  # grab UTC now.
             if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
-                self.log.info("checkhardball: nextcheck is in the future")
                 return  # bail.
             else:  # we are past when we should be holding off checking.
                 self.log.info("checkhardball: past nextcheck time so we're resetting it.")
@@ -737,9 +809,11 @@ class Hardball(callbacks.Plugin):
                 # game status change.
                 if (v['status'] != games2[k]['status']):  # F = finished, O = PPD, D = Delay, S = Future
                     if ((v['status'] == 'S') and (games2[k]['status'] == 'P')):  # game starts.
+                        self.log.info("{0} is starting.".format(k))
                         message = self._gamestart(games2[k])
                         self._post(irc, v['awayt'], v['homet'], message)
                     elif ((v['status'] == "P") and (games2[k]['status'] == 'F')):  # game finishes.
+                        self.log.info("{0} is ending.".format(k))
                         message = self._gameend(games2[k])
                         self._post(irc, v['awayt'], v['homet'], message)
                     elif ((v['status'] in ('P', 'S')) and (games2[k]['status'] == 'D')):  # game goes into delay.
