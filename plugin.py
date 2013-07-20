@@ -309,8 +309,10 @@ class Hardball(callbacks.Plugin):
                     era = "0.00"  # would get divby0 error otherwise.
                 else:  # calculate it if we have otherwise.
                     era = 9*(int(s[7])/float(ip))  # ERA = 9 × (ER/IP)
-                # inject. key is the pid.
-                pitchers[s[1]] = "{0}-{1}, {2:.2f}".format(s[8], s[9] ,era)
+                # create statline.
+                statline = "{0}-{1}, {2:.2f}".format(s[8], s[9], era)
+                # make the dict.
+                pitchers[s[1]] = {'era': statline, 'saves':s[10]}
         # make sure we have something to return.
         if len(pitchers) == 0:
             return None
@@ -507,12 +509,12 @@ class Hardball(callbacks.Plugin):
                 # Finally, return something like: T6 - player scoring event.
                 return "{0} - {1} {2}".format(inning, player, rbitext)
 
-    ######################
-    # NON-SCORING EVENTS #
-    ######################
+    ##########################################
+    # INTERNAL EVENT HANDLING AND FORMATTING #
+    ##########################################
 
     def _yahoofinal(self, gid):
-        """Handle final event stuff."""
+        """Handle final event messaging.."""
 
         url = b64decode('aHR0cDovL2F1ZDEyLnNwb3J0cy5hYzQueWFob28uY29tL21sYi9nYW1lcy50eHQ=')
         html = self._httpget(url)
@@ -532,12 +534,23 @@ class Hardball(callbacks.Plugin):
             return None
         # we do have fields, so lets process them and translate into players.
         if fields:  # fields->pids.
-            losing = self._yahooplayer(fields.groupdict()['losing'])
-            winning = self._yahooplayer(fields.groupdict()['winning'])
+            losing = self._yahooplayerwrapper(fields.groupdict()['losing'])
+            winning = self._yahooplayerwrapper(fields.groupdict()['winning'])
             if fields.groupdict()['save'] != '0':  # if save is not 0 (ie: no save) so we grab it.
-                save = self._yahooplayer(fields.groupdict()['save'])
+                save = self._yahooplayerwrapper(fields.groupdict()['save'])
             else:  # save was 0. (no Save.)
                 save = None
+            # lets decorate up the pitching with ERA + SAVE records.
+            pr = self._pitchers()  # should return a dict.
+            if pr:  # only manip if we get this back.
+                if str(fields.groupdict()['losing']) in pr:  # check for key membership.
+                    losing = "{0}({1})".format(losing, pr[str(fields.groupdict()['losing'])]['era'])
+                if str(fields.groupdict()['winning']) in pr:  # check for key membership.
+                    winning = "{0}({1})".format(winning, pr[str(fields.groupdict()['winning'])]['era'])
+                if save:
+                    if str(fields.groupdict()['save']) in pr:  # check for membership.
+                        save = "{0}({1})".format(save, pr[str(fields.groupdict()['save'])]['saves'])
+
         # now, lets construct the actual return message.
         if losing and winning and not save:  # just L and W. no save.
             finalline = "W: {0} L: {1}".format(losing, winning)
@@ -607,9 +620,9 @@ class Hardball(callbacks.Plugin):
         pr = self._pitchers()  # should return a dict.
         if pr:  # only manip if we get this back.
             if ev['awaypit'] in pr:  # check for key membership.
-                awaypit = "{0}({1})".format(awaypit, pr[ev['awaypit']])
+                awaypit = "{0}({1})".format(awaypit, pr[ev['awaypit']]['era'])
             if ev['homepit'] in pr:  # check for key membership.
-                homepit = "{0}({1})".format(homepit, pr[ev['homepit']])
+                homepit = "{0}({1})".format(homepit, pr[ev['homepit']]['era'])
         # now format the message for output.
         starting = ircutils.mircColor("Starting", 'green')
         if awaypit and homepit:
