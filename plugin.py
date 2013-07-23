@@ -430,6 +430,7 @@ class Hardball(callbacks.Plugin):
                                 (?P<fe>fielding\serror.*?)|
                                 (?P<grd>ground\srule\sdouble.*?)|
                                 (?P<fc>fielder\'s\schoice.*?)|
+                                (?P<balk>.*?)|
                                 (?P<error>((.*?error\,.*?)|(.*?error))
                                 )$  # END.
                                 """, re.VERBOSE)
@@ -458,8 +459,8 @@ class Hardball(callbacks.Plugin):
                         # now, we conditionally handle events based on named groups in the regex from above.
                         # it should blowup if something doesn't match, in which case I'll fix.
                         ## FIX REGEXES:
+                        ## ERROR: scoringregex did not match anything in [7254] scored on balk
                         ## I THINK I FIXED WHAT IS BELOW.
-                        ## Carlos Pena reaches on a force attempt, throwing error by first baseman Mitch Moreland. 1 run scores.
                         ## [6621] safe at first on first baseman [8772]'s throwing error, [8635] scored, [8640] to second
                         ## [7746] safe at first on third baseman [8624]'s throwing error, [8968] scored, [6679] to third
                         ## [8289] scored, [6615] to third on [7939]'s throwing error
@@ -485,6 +486,8 @@ class Hardball(callbacks.Plugin):
                             rbitext = "scored on passed ball"
                         elif srmatch == 'wp':
                             rbitext = "scored on wild pitch"
+                        elif srmatch == "balk":
+                            rbitext = "scored on a balk"
                         elif srmatch == 'fe':
                             runs = self._runmatchtext(srmatchtext)
                             rbitext = "safe at first. {0} run(s) score".format(runs)
