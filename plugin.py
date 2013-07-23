@@ -430,7 +430,7 @@ class Hardball(callbacks.Plugin):
                                 (?P<fe>fielding\serror.*?)|
                                 (?P<grd>ground\srule\sdouble.*?)|
                                 (?P<fc>fielder\'s\schoice.*?)|
-                                (?P<error>.*?error\,.*?)
+                                (?P<error>((.*?error\,.*?)|(.*?error))
                                 )$  # END.
                                 """, re.VERBOSE)
             m = lineregex.search(ev)  # this breaks up the line into player and (homerun|non-hr event)
@@ -458,12 +458,12 @@ class Hardball(callbacks.Plugin):
                         # now, we conditionally handle events based on named groups in the regex from above.
                         # it should blowup if something doesn't match, in which case I'll fix.
                         ## FIX REGEXES:
+                        ## I THINK I FIXED WHAT IS BELOW.
                         ## Carlos Pena reaches on a force attempt, throwing error by first baseman Mitch Moreland. 1 run scores.
                         ## [6621] safe at first on first baseman [8772]'s throwing error, [8635] scored, [8640] to second
                         ## [7746] safe at first on third baseman [8624]'s throwing error, [8968] scored, [6679] to third
-                        ## FIXED
-                        ## Desmond Jennings S: reached on bunt single to first, [7938] scored -- assigned to single.
-                        ## [9046] sacrificed to pitcher, [9234] scored, [9094] to second -- assigned to go.
+                        ## [8289] scored, [6615] to third on [7939]'s throwing error
+                        ## [7857] sacrificed, [6327] to third, [8789] to second, [6327] scored, [8789] to third, [7857] to second on third baseman [8848]'s throwing error
                         if srmatch == 'single':
                             rbitext = "RBI {0}".format(srmatch)
                         if srmatch in ('double', 'triple'):
@@ -498,7 +498,7 @@ class Hardball(callbacks.Plugin):
                             outtext = srmatchtext.split(',')[0]  # everything before the comma.
                             outtext = re.sub('\[(\d+)\]', lambda m: self._yahooplayerwrapper(m.group(1)), outtext)  # replace.
                             runs = self._runmatchtext(srmatchtext)
-                            rbitext = "{0}. {1} run scores.".format(outtext, runs)
+                            rbitext = "{0}. {1} run(s) scores.".format(outtext, runs)
                     else:  # scoring regex did not match we output and log.
                         self.log.error("ERROR: scoringregex did not match anything in {0}".format(ev))
                         rbitext = re.sub('\[(\d+)\]', lambda m: self._yahooplayerwrapper(m.group(1)), s)  # replace [\d+] w/player.
@@ -849,28 +849,31 @@ class Hardball(callbacks.Plugin):
         # now that we're done checking changes, copy the new into self.games to check against next time.
         self.games = games2
         # last, before we reset to check again, we need to verify some states of games in order to set sentinel or not.
+        # STATUSES: S = future, P = playing, F = final, D = delay
         # first, we grab all the statuses in newgames (games2)
         gamestatuses = set([v['status'] for (k, v) in games2.items()])
         # next, check what the statuses of those games are and act accordingly.
         if (('D' in gamestatuses) or ('P' in gamestatuses)):  # if any games are being played or in a delay, act normal.
             self.nextcheck = None  # set to None to make sure we're checking on normal time.
-        elif 'S' in gamestatuses:  # no games being played or in delay, but we have games in the future. (ie: day games done but night games later)
-            firstgametime = sorted([f['start'] for (i, f) in games2.items() if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
-            utcnow = self._utcnow()  # grab UTC now.
-            if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
-                self.nextcheck = firstgametime  # set to the "first" game with 'S'.
-                self.log.info("checkhardball: we have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
-            else:  # firstgametime is NOT in the future. this is a problem.
-                fgtdiff = abs(firstgametime-utcnow)  # get how long ago the first game should have been.
-                if fgtdiff < 3601:  # if less than an hour ago, just basically pass.
-                    self.nextcheck = None
-                    self.log.info("checkhardball: firstgametime has passed but is under an hour so we resume normal operations.")
-                else:  # over an hour so we set firstgametime an hour from now.
-                    self.nextcheck = utcnow+3600
-                    self.log.info("checkhardball: firstgametime is over an hour from now so we're going to backoff for an hour".format(firstgametime))
-        else:  # everything is "F" (Final). we want to backoff so we're not flooding.
-            self.nextcheck = utcnow+600  # 10 minutes from now.
-            self.log.info("checkhardball: no active games and I have not got new games yet, so I am holding off for 10 minutes.")
+        else:  # no games that are active or in delay.
+            if 'S' in gamestatuses:  # we do have games in the future (could be either before the slate or after day games are done and before night ones).
+                firstgametime = sorted([f['start'] for (i, f) in games2.items() if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
+                utcnow = self._utcnow()  # grab UTC now.
+                if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
+                    self.log.info("checkhardball: we have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
+                    self.nextcheck = firstgametime  # set to the "first" game with 'S'.
+                else:  # firstgametime is NOT in the future. this is a problem.
+                    fgtdiff = abs(firstgametime-utcnow)  # get how long ago the first game should have been.
+                    if fgtdiff < 3601:  # if less than an hour ago, just basically pass. (8:01 for an 8pm game)
+                        self.log.info("checkhardball: firstgametime has passed but is under an hour so we resume normal operations.")
+                        self.nextcheck = None
+                    else:  # over an hour so we set firstgametime an hour from now.
+                        self.log.info("checkhardball: firstgametime is over an hour from now so we're going to backoff for an hour")
+                        self.nextcheck = utcnow+3600
+            else:  # everything is "F" (Final). we want to backoff so we're not flooding.
+                self.log.info("checkhardball: no active games and I have not got new games yet, so I am holding off for 10 minutes.")
+                self.nextcheck = utcnow+600  # 10 minutes from now.
+
 
 Class = Hardball
 
