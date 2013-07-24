@@ -468,11 +468,12 @@ class Hardball(callbacks.Plugin):
                         ## [7746] safe at first on third baseman [8624]'s throwing error, [8968] scored, [6679] to third
                         ## [8289] scored, [6615] to third on [7939]'s throwing error
                         ## [7857] sacrificed, [6327] to third, [8789] to second, [6327] scored, [8789] to third, [7857] to second on third baseman [8848]'s throwing error
-                        if srmatch == 'single':
-                            rbitext = "RBI {0}".format(srmatch)
-                        if srmatch in ('double', 'triple'):
+                        if srmatch in ('single', 'double', 'triple'):
                             runs = self._runmatchtext(srmatchtext)  # send the remaining text to determine runs.
-                            rbitext = "{0}RBI {1}".format(runs, srmatch)
+                            if runs == 1:  # conditional text. RBI dobule
+                                rbitext = "RBI {0}".format(srmatch)
+                            else:
+                                rbitext = "{0}RBI {1}".format(runs, srmatch)
                         elif srmatch == 'go':
                             runs = self._runmatchtext(srmatchtext)
                             rbitext = "grounds out. {0} run(s) score".format(runs)
