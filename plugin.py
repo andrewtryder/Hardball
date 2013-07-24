@@ -305,10 +305,13 @@ class Hardball(callbacks.Plugin):
                 s = line.split('|')
                 # we calculate ERA below.
                 ip = float(s[2])
+                er = int(s[7])
                 if ip == "0.0":  # special case if ip is 0.
-                    era = "0.00"  # would get divby0 error otherwise.
+                    era = float("0.00")  # would get divby0 error otherwise.
+                elif er == 0:  # special case if er is 0.
+                    era = float("0.00")  # would get divby0 also.
                 else:  # calculate it if we have otherwise.
-                    era = 9*(int(s[7])/float(ip))  # ERA = 9 × (ER/IP)
+                    era = 9*(er/ip)  # ERA = 9 × (ER/IP)
                 # create statline.
                 statline = "{0}-{1}, {2:.2f}".format(s[8], s[9], era)
                 # make the dict.
@@ -431,7 +434,7 @@ class Hardball(callbacks.Plugin):
                                 (?P<grd>ground\srule\sdouble.*?)|
                                 (?P<fc>fielder\'s\schoice.*?)|
                                 (?P<balk>.*?)|
-                                (?P<error>((.*?error\,.*?)|(.*?error))
+                                (?P<error>((.*?error\,.*?)|(.*?error)))
                                 )$  # END.
                                 """, re.VERBOSE)
             m = lineregex.search(ev)  # this breaks up the line into player and (homerun|non-hr event)
@@ -876,7 +879,6 @@ class Hardball(callbacks.Plugin):
             else:  # everything is "F" (Final). we want to backoff so we're not flooding.
                 self.log.info("checkhardball: no active games and I have not got new games yet, so I am holding off for 10 minutes.")
                 self.nextcheck = utcnow+600  # 10 minutes from now.
-
 
 Class = Hardball
 
