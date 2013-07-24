@@ -863,9 +863,9 @@ class Hardball(callbacks.Plugin):
         if (('D' in gamestatuses) or ('P' in gamestatuses)):  # if any games are being played or in a delay, act normal.
             self.nextcheck = None  # set to None to make sure we're checking on normal time.
         else:  # no games that are active or in delay.
+            utcnow = self._utcnow()  # grab UTC now.
             if 'S' in gamestatuses:  # we do have games in the future (could be either before the slate or after day games are done and before night ones).
                 firstgametime = sorted([f['start'] for (i, f) in games2.items() if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
-                utcnow = self._utcnow()  # grab UTC now.
                 if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
                     self.log.info("checkhardball: we have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
                     self.nextcheck = firstgametime  # set to the "first" game with 'S'.
