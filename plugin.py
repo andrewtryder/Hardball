@@ -47,6 +47,9 @@ class Hardball(callbacks.Plugin):
         # initial states for games.
         self.games = None
         self.nextcheck = None
+        # fetchhost system.
+        self.fetchhost = None
+        self.fetchhostcheck = None
         # fill in the blanks.
         if not self.games:
             self.games = self._fetchgames()
@@ -205,14 +208,44 @@ class Hardball(callbacks.Plugin):
     # FETCH OPERATIONS #
     ####################
 
+    def _fetchhost(self):
+        """Return the host for fetch operations."""
+
+        utcnow = self._utcnow()
+        # if we don't have the host, lastchecktime, or fetchhostcheck has passed, we regrab.
+        if ((not self.fetchhostcheck) or (not self.fetchhost) or (self.fetchhostcheck < utcnow)):
+            url = b64decode('aHR0cDovL2F1ZC5zcG9ydHMueWFob28uY29tL2Jpbi9ob3N0bmFtZQ==')
+            headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
+            html = self._httpget(url, h=headers)  # try and grab.
+            if not html:
+                self.log.error("ERROR: _fetchhost: could not fetch {0}")
+                return None
+            # now that we have html, make sure its valid.
+            if html.startswith("aud"):
+                fhurl = 'http://%s' % (html.strip())
+                self.fetchhost = fhurl  # set the url.
+                self.fetchhostcheck = utcnow+3600  # 1hr from now.
+                return fhurl
+            else:
+                self.log.error("ERROR: _fetchhost: returned string didn't match aud. We got {0}".format(html))
+                return None
+        else:  # we have a host and it's under the cache time.
+            return self.fetchhost
+
     def _fetchgames(self):
         """Return the games.txt data."""
 
-        url = b64decode('aHR0cDovL2F1ZDEyLnNwb3J0cy5hYzQueWFob28uY29tL21sYi9nYW1lcy50eHQ=')
+        url = self._fetchhost()  # grab the host to check.
+        if not url:  # didn't get it back.
+            self.log.error("ERROR: _fetchgames broke on _fetchhost()")
+            return None
+        else:  # we got fetchhost. create the url.
+            url = "%s/mlb/games.txt" % (url)
+        # now we try and fetch the actual url with data.
         headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
         html = self._httpget(url, h=headers)
         if not html:
-            self.log.error("ERROR: _fetchgames: could not fetch {0} :: {1}".format(url, e))
+            self.log.error("ERROR: _fetchgames: could not fetch {0} :: {1}".format(url))
             return None
         # now turn the "html" into a list of dicts.
         newgames = self._txttodict(html)
@@ -259,11 +292,17 @@ class Hardball(callbacks.Plugin):
     def _teamrecords(self):
         """Fetch the table of team records for when a game begins."""
 
-        url = b64decode('aHR0cDovL2F1ZDIxLnNwb3J0cy5hYzQueWFob28uY29t') + '/mlb/teams.txt'
+        url = self._fetchhost()  # grab the host to check.
+        if not url:  # didn't get it back.
+            self.log.error("ERROR: _teamrecords broke on _fetchhost()")
+            return None
+        else:  # we got fetchhost. create the url.
+            url = "%s/mlb/teams.txt" % (url)
+        # now we try and fetch the actual url with data.
         headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
         html = self._httpget(url, h=headers)
         if not html:
-            self.log.error("ERROR: _teamrecords: could not fetch {0} :: {1}".format(url, e))
+            self.log.error("ERROR: _teamrecords: could not fetch {0} :: {1}".format(url))
             return None
         # now split the lines.
         lines = html.splitlines()
@@ -287,7 +326,13 @@ class Hardball(callbacks.Plugin):
     def _pitchers(self):
         """Fetch pitcher statlines."""
 
-        url = b64decode('aHR0cDovL2F1ZDIxLnNwb3J0cy5hYzQueWFob28uY29t') + '/mlb/stats.txt'
+        url = self._fetchhost()  # grab the host to check.
+        if not url:  # didn't get it back.
+            self.log.error("ERROR: _pitchers broke on _fetchhost()")
+            return None
+        else:  # we got fetchhost. create the url.
+            url = "%s/mlb/stats.txt" % (url)
+        # now we try and fetch the actual url with data.
         headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
         html = self._httpget(url, h=headers)
         if not html:
@@ -321,6 +366,60 @@ class Hardball(callbacks.Plugin):
             return None
         else:  # return dict.
             return pitchers
+
+    def _yahoofinal(self, gid):
+        """Handle final event messaging.."""
+
+        url = self._fetchhost()  # grab the host to check.
+        if not url:  # didn't get it back.
+            self.log.error("ERROR: _yahoofinal broke on _fetchhost()")
+            return None
+        else:  # we got fetchhost. create the url.
+            url = "%s/mlb/games.txt" % (url)
+        # now we grab the url.
+        html = self._httpget(url)
+        if not html:  # bail if we have nothing.
+            self.log.error("ERROR: _yahoofinal. I could not fetch for gid: %s" % gid)
+            return None
+        # now that we have the html, try and find the line we need.
+        endgame = re.search('^(z\|'+gid+'\|.*?)$', html, re.M|re.S)
+        if not endgame:  # bail if we don't have it.
+            self.log.error("ERROR: _yahoofinal looking for endgame but got: %s" % endgame)
+            return None
+        # we do have endgame regex so lets process it.
+        endline = endgame.group(1)
+        fields = re.search('^z\|\d+\|(?P<losing>\d+)\|(?P<winning>\d+)\|(?P<save>\d+)$', endline)
+        if not fields:  # if, for some reason, the fields don't match.
+            self.log.error("ERROR: _yahoofinal looking for fields in: %" % (endline))
+            return None
+        # we do have fields, so lets process them and translate into players.
+        if fields:  # fields->pids.
+            losing = self._yahooplayerwrapper(fields.groupdict()['losing'])
+            winning = self._yahooplayerwrapper(fields.groupdict()['winning'])
+            if fields.groupdict()['save'] != '0':  # if save is not 0 (ie: no save) so we grab it.
+                save = self._yahooplayerwrapper(fields.groupdict()['save'])
+            else:  # save was 0. (no Save.)
+                save = None
+            # lets decorate up the pitching with ERA + SAVE records.
+            pr = self._pitchers()  # should return a dict.
+            if pr:  # only manip if we get this back.
+                if str(fields.groupdict()['losing']) in pr:  # check for key membership.
+                    losing = "{0}({1})".format(losing, pr[str(fields.groupdict()['losing'])]['era'])
+                if str(fields.groupdict()['winning']) in pr:  # check for key membership.
+                    winning = "{0}({1})".format(winning, pr[str(fields.groupdict()['winning'])]['era'])
+                if save:
+                    if str(fields.groupdict()['save']) in pr:  # check for membership.
+                        save = "{0}({1})".format(save, pr[str(fields.groupdict()['save'])]['saves'])
+
+        # now, lets construct the actual return message.
+        if losing and winning and not save:  # just L and W. no save.
+            finalline = "W: {0} L: {1}".format(losing, winning)
+        elif losing and winning and save:  # W/L/S.
+            finalline = "W: {0} L: {1} S: {2}".format(losing, winning, save)
+        else:  # something failed above.
+            finalline = None
+        # last, we return whatever we have.
+        return finalline
 
     ##########################
     # YAHOO PLAYER INTERNALS #
@@ -433,7 +532,7 @@ class Hardball(callbacks.Plugin):
                                 (?P<fe>fielding\serror.*?)|
                                 (?P<grd>ground\srule\sdouble.*?)|
                                 (?P<fc>fielder\'s\schoice.*?)|
-                                (?P<balk>.*?)|
+                                (?P<balk>.*?balk)|
                                 (?P<error>((.*?error\,.*?)|(.*?error)))
                                 )$  # END.
                                 """, re.VERBOSE)
@@ -519,54 +618,6 @@ class Hardball(callbacks.Plugin):
     ##########################################
     # INTERNAL EVENT HANDLING AND FORMATTING #
     ##########################################
-
-    def _yahoofinal(self, gid):
-        """Handle final event messaging.."""
-
-        url = b64decode('aHR0cDovL2F1ZDEyLnNwb3J0cy5hYzQueWFob28uY29tL21sYi9nYW1lcy50eHQ=')
-        html = self._httpget(url)
-        if not html:  # bail if we have nothing.
-            self.log.error("ERROR: _yahoofinal. I could not fetch for gid: %s" % gid)
-            return None
-        # now that we have the html, try and find the line we need.
-        endgame = re.search('^(z\|'+gid+'\|.*?)$', html, re.M|re.S)
-        if not endgame:  # bail if we don't have it.
-            self.log.error("ERROR: _yahoofinal looking for endgame but got: %s" % endgame)
-            return None
-        # we do have endgame regex so lets process it.
-        endline = endgame.group(1)
-        fields = re.search('^z\|\d+\|(?P<losing>\d+)\|(?P<winning>\d+)\|(?P<save>\d+)$', endline)
-        if not fields:  # if, for some reason, the fields don't match.
-            self.log.error("ERROR: _yahoofinal looking for fields in: %" % (endline))
-            return None
-        # we do have fields, so lets process them and translate into players.
-        if fields:  # fields->pids.
-            losing = self._yahooplayerwrapper(fields.groupdict()['losing'])
-            winning = self._yahooplayerwrapper(fields.groupdict()['winning'])
-            if fields.groupdict()['save'] != '0':  # if save is not 0 (ie: no save) so we grab it.
-                save = self._yahooplayerwrapper(fields.groupdict()['save'])
-            else:  # save was 0. (no Save.)
-                save = None
-            # lets decorate up the pitching with ERA + SAVE records.
-            pr = self._pitchers()  # should return a dict.
-            if pr:  # only manip if we get this back.
-                if str(fields.groupdict()['losing']) in pr:  # check for key membership.
-                    losing = "{0}({1})".format(losing, pr[str(fields.groupdict()['losing'])]['era'])
-                if str(fields.groupdict()['winning']) in pr:  # check for key membership.
-                    winning = "{0}({1})".format(winning, pr[str(fields.groupdict()['winning'])]['era'])
-                if save:
-                    if str(fields.groupdict()['save']) in pr:  # check for membership.
-                        save = "{0}({1})".format(save, pr[str(fields.groupdict()['save'])]['saves'])
-
-        # now, lets construct the actual return message.
-        if losing and winning and not save:  # just L and W. no save.
-            finalline = "W: {0} L: {1}".format(losing, winning)
-        elif losing and winning and save:  # W/L/S.
-            finalline = "W: {0} L: {1} S: {2}".format(losing, winning, save)
-        else:  # something failed above.
-            finalline = None
-        # last, we return whatever we have.
-        return finalline
 
     def _inningscalc(self, inningno):
         """Do some math to convert int innings into human-readable."""
