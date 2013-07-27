@@ -561,12 +561,7 @@ class Hardball(callbacks.Plugin):
                         # now, we conditionally handle events based on named groups in the regex from above.
                         # it should blowup if something doesn't match, in which case I'll fix.
                         ## FIX REGEXES:
-                        ## ERROR: scoringregex did not match anything in [7254] scored on balk
-                        ## I THINK I FIXED WHAT IS BELOW.
-                        ## [6621] safe at first on first baseman [8772]'s throwing error, [8635] scored, [8640] to second
-                        ## [7746] safe at first on third baseman [8624]'s throwing error, [8968] scored, [6679] to third
-                        ## [8289] scored, [6615] to third on [7939]'s throwing error
-                        ## [7857] sacrificed, [6327] to third, [8789] to second, [6327] scored, [8789] to third, [7857] to second on third baseman [8848]'s throwing error
+                        ## ALL FIXED?
                         if srmatch in ('single', 'double', 'triple'):
                             runs = self._runmatchtext(srmatchtext)  # send the remaining text to determine runs.
                             if runs == 1:  # conditional text. RBI dobule
