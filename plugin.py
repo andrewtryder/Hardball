@@ -533,6 +533,7 @@ class Hardball(callbacks.Plugin):
                                 (?P<grd>ground\srule\sdouble.*?)|
                                 (?P<fc>fielder\'s\schoice.*?)|
                                 (?P<balk>.*?balk)|
+                                (?P<itphr>inside\sthe\spark\shome\srun.*?)|
                                 (?P<error>((.*?error\,.*?)|(.*?error)))
                                 )$  # END.
                                 """, re.VERBOSE)
@@ -561,13 +562,16 @@ class Hardball(callbacks.Plugin):
                         # now, we conditionally handle events based on named groups in the regex from above.
                         # it should blowup if something doesn't match, in which case I'll fix.
                         ## FIX REGEXES:
-                        ## ALL FIXED?
+                        ## scoringregex did not match anything in [7560] hit an inside the park home run to deep right, [7939] scored
                         if srmatch in ('single', 'double', 'triple'):
                             runs = self._runmatchtext(srmatchtext)  # send the remaining text to determine runs.
                             if runs == 1:  # conditional text. RBI dobule
                                 rbitext = "RBI {0}".format(srmatch)
                             else:
                                 rbitext = "{0}RBI {1}".format(runs, srmatch)
+                        elif srmatch == 'itphr':
+                            runs = self._runmatchtext(srmatchtext)
+                            rbitext = "inside the park home run. {0} run(s) score".format(runs)
                         elif srmatch == 'go':
                             runs = self._runmatchtext(srmatchtext)
                             rbitext = "grounds out. {0} run(s) score".format(runs)
@@ -795,9 +799,10 @@ class Hardball(callbacks.Plugin):
             # we are doing an add/del op.
             optchannel, optarg = optchannel.lower(), optarg.upper()
             # make sure channel is something we're in
-            if optchannel not in irc.state.channels:
-                irc.reply("ERROR: '{0}' is not a valid channel. You must add a channel that we are in.".format(optchannel))
-                return
+            if op == 'add':  # check for channel on add only.
+                if optchannel not in irc.state.channels:
+                    irc.reply("ERROR: '{0}' is not a valid channel. You must add a channel that we are in.".format(optchannel))
+                    return
             # test for valid team now.
             testarg = self._validteam(team=optarg)
             if not testarg:  # invalid arg(team)
@@ -820,6 +825,8 @@ class Hardball(callbacks.Plugin):
             teamid = self._teamnametoid(optarg)
             if teamid in self.channels[optchannel]:  # id is already in.
                 self.channels[optchannel].remove(teamid)  # remove it.
+                if len(self.channels[optchannel]) == 0:  # none left.
+                    del self.channels[optchannel]  # delete the channel key.
                 self._savepickle()  # save it.
                 irc.reply("I have successfully removed {0} from {1}".format(optarg, optchannel))
             else:
