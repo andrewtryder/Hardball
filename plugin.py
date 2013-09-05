@@ -10,7 +10,6 @@ from __future__ import division  # so we're not Bankers rounding.
 from base64 import b64decode
 import cPickle as pickle
 import datetime
-from operator import itemgetter
 import re
 from BeautifulSoup import BeautifulSoup
 import sqlite3
@@ -83,10 +82,8 @@ class Hardball(callbacks.Plugin):
             self.log.info(url)
 
         try:
-            if h and d:
-                page = utils.web.getUrl(url, headers=h, data=d)
-            else:
-                page = utils.web.getUrl(url)
+            h = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
+            page = utils.web.getUrl(url, headers=h)
             return page
         except utils.web.Error as e:
             self.log.error("ERROR opening {0} message: {1}".format(url, e))
@@ -123,6 +120,10 @@ class Hardball(callbacks.Plugin):
         # iterate over each.
         for postchan in postchans:
             try:
+                # check to see if we should prefix output.
+                if self.registryValue('prefix', postchan):  # we do so lets prefix and output.
+                    message = "{0}{1}".format(self.registryValue('prefixString', postchan), message)
+                # now send  the actual output.
                 irc.queueMsg(ircmsgs.privmsg(postchan, message))
             except Exception as e:
                 self.log.error("ERROR: Could not send {0} to {1}. {2}".format(message, postchan, e))
@@ -215,8 +216,7 @@ class Hardball(callbacks.Plugin):
         # if we don't have the host, lastchecktime, or fetchhostcheck has passed, we regrab.
         if ((not self.fetchhostcheck) or (not self.fetchhost) or (self.fetchhostcheck < utcnow)):
             url = b64decode('aHR0cDovL2F1ZC5zcG9ydHMueWFob28uY29tL2Jpbi9ob3N0bmFtZQ==')
-            headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
-            html = self._httpget(url, h=headers)  # try and grab.
+            html = self._httpget(url)  # try and grab.
             if not html:
                 self.log.error("ERROR: _fetchhost: could not fetch {0}")
                 return None
@@ -242,8 +242,7 @@ class Hardball(callbacks.Plugin):
         else:  # we got fetchhost. create the url.
             url = "%s/mlb/games.txt" % (url)
         # now we try and fetch the actual url with data.
-        headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
-        html = self._httpget(url, h=headers)
+        html = self._httpget(url)
         if not html:
             self.log.error("ERROR: _fetchgames: could not fetch {0} :: {1}".format(url))
             return None
@@ -299,8 +298,7 @@ class Hardball(callbacks.Plugin):
         else:  # we got fetchhost. create the url.
             url = "%s/mlb/teams.txt" % (url)
         # now we try and fetch the actual url with data.
-        headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
-        html = self._httpget(url, h=headers)
+        html = self._httpget(url)
         if not html:
             self.log.error("ERROR: _teamrecords: could not fetch {0} :: {1}".format(url))
             return None
@@ -333,8 +331,7 @@ class Hardball(callbacks.Plugin):
         else:  # we got fetchhost. create the url.
             url = "%s/mlb/stats.txt" % (url)
         # now we try and fetch the actual url with data.
-        headers = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
-        html = self._httpget(url, h=headers)
+        html = self._httpget(url)
         if not html:
             self.log.error("ERROR: _teamrecords: could not fetch {0} :: {1}".format(url, e))
             return None
@@ -410,7 +407,6 @@ class Hardball(callbacks.Plugin):
                 if save:
                     if str(fields.groupdict()['save']) in pr:  # check for membership.
                         save = "{0}({1})".format(save, pr[str(fields.groupdict()['save'])]['saves'])
-
         # now, lets construct the actual return message.
         if losing and winning and not save:  # just L and W. no save.
             finalline = "W: {0} L: {1}".format(losing, winning)
@@ -435,8 +431,9 @@ class Hardball(callbacks.Plugin):
                 self.log.error("ERROR: _yahoopid: Could not fetch {0}".format(url))
                 return None
             soup = BeautifulSoup(html)
-            pname = soup.find('li', attrs={'class':'player-name'}).getText().encode('utf-8')
-            return "{0}".format(pname.strip())
+            pname = soup.find('li', attrs={'class':'player-name'}).getText().encode('utf-8').strip()
+            self.log.info("_yahoopid: We need to add PID: {0} as {1}".format(pid, pname))
+            return "{0}".format(pname)
         except Exception, e:
             self.log.error("ERROR: _yahoopid :: {0} :: {1}".format(pid, e))
             return None
@@ -456,7 +453,7 @@ class Hardball(callbacks.Plugin):
         else:  # no player in the db.
             pname = self._yahoopid(pid)  # try yahoo fetch.
             if not pname:  # we did not get back a pid.
-                pname = None  # need to yield something.
+                pname = "None"  # need to yield something.
         # return.
         return pname
 
@@ -495,7 +492,13 @@ class Hardball(callbacks.Plugin):
     def _gameevfetch(self, gid):
         """Handles scoring event parsing for output."""
 
-        url = b64decode('aHR0cDovL2F1ZDEyLnNwb3J0cy5hYzQueWFob28uY29tL21sYi8=') + 'plays-%s.txt' % (gid)
+        url = self._fetchhost()  # grab the host to check.
+        if not url:  # didn't get it back.
+            self.log.error("ERROR: _fetchgames broke on _fetchhost()")
+            return None
+        else:  # we got fetchhost. create the url.
+            url = "%s/mlb/plays-%s.txt" % (url, gid)
+        # now do our http fetch.
         html = self._httpget(url)
         if not html:
             self.log.error("ERROR: Could not gameevfetch: {0} :: {1}".format(gid, e))
@@ -822,14 +825,17 @@ class Hardball(callbacks.Plugin):
                 for (k, v) in self.channels.items():  # iterate through and output
                     irc.reply("{0} :: {1}".format(k, " | ".join([self._teams(team=q) for q in v])))
         elif op == 'del':  # delete an item from channels.
-            teamid = self._teamnametoid(optarg)
-            if teamid in self.channels[optchannel]:  # id is already in.
-                self.channels[optchannel].remove(teamid)  # remove it.
-                if len(self.channels[optchannel]) == 0:  # none left.
-                    del self.channels[optchannel]  # delete the channel key.
-                self._savepickle()  # save it.
-                irc.reply("I have successfully removed {0} from {1}".format(optarg, optchannel))
-            else:
+            if optchannel in self.channels:  # make sure channel is in self.channels.
+                teamid = self._teamnametoid(optarg)
+                if teamid in self.channels[optchannel]:  # id is already in.
+                    self.channels[optchannel].remove(teamid)  # remove it.
+                    if len(self.channels[optchannel]) == 0:  # none left.
+                        del self.channels[optchannel]  # delete the channel key.
+                    self._savepickle()  # save it.
+                    irc.reply("I have successfully removed {0} from {1}".format(optarg, optchannel))
+                else:
+                    irc.reply("ERROR: I do not have {0} in {1}".format(optarg, optchannel))
+            else:  # channel is not in self.channels.
                 irc.reply("ERROR: I do not have {0} in {1}".format(optarg, optchannel))
 
     hardballchannel = wrap(hardballchannel, [('checkCapability', 'admin'), ('somethingWithoutSpaces'), optional('channel'), optional('somethingWithoutSpaces')])
