@@ -473,6 +473,18 @@ class Hardball(callbacks.Plugin):
     def _runmatchtext(self, txt):
         """This takes a non-hr scoring event and parses the number of runs in it."""
 
+        # NEED TO ADD
+        # ERROR 2013-08-02T22:31:50 ERROR: _runmatchtext could not parse: scored on [8592]'s fielding error, [8874] out at second
+        # ERROR 2013-08-06T23:08:47 ERROR: _runmatchtext could not parse: scored on [8578]'s fielding error
+        # ERROR 2013-08-11T14:24:25 ERROR: _runmatchtext could not parse: scored on [9015]'s fielding error
+        # ERROR 2013-08-17T20:58:25 ERROR: _runmatchtext could not parse: scored on [8991]'s throwing error
+        # ERROR 2013-08-21T20:11:04 ERROR: _runmatchtext could not parse: scored, [7710] to second on [9007]'s fielding error
+        # ERROR 2013-08-23T21:05:10 ERROR: _runmatchtext could not parse: inside the park home run to shallow left
+        # ERROR 2013-08-28T21:15:57 ERROR: _runmatchtext could not parse: scored, [7511] to third on [7628]'s throwing error
+        # ERROR 2013-08-31T20:24:27 ERROR: _runmatchtext could not parse: scored, [9268] to second on [9115]'s fielding error
+        # ERROR 2013-09-04T16:34:45 ERROR: _runmatchtext could not parse: scored on [7276]'s throwing error
+        # ERROR 2013-09-13T20:22:15 ERROR: _runmatchtext could not parse: inside the park home run to deep right center
+
         scoredregex = re.compile(r'(?P<three>\[\d+]\, \[\d+\] and \[\d+\] scored)|(?P<two>\[\d+\] and \[\d+\] scored)|(?P<one>(\[\d+\] scored))')
         sruns = scoredregex.search(txt)
         # regex or not.
@@ -520,24 +532,26 @@ class Hardball(callbacks.Plugin):
             # the second is mixed: it's either a 'scoring' event or a homerun. we regex each.
             # line handles splitting these into either. sregex handles different scoring events using named groups.
             # scored handles how many runs were scored in a non-homerun event.
+            # NEED TO ADD:
             lineregex = re.compile(r'^\[(?P<p>\d+)\]\s((?P<h>homered.*?)|(?P<s>.*?))$')
             sregex = re.compile(r"""
                                 (  # START.
                                 (?P<single>single.*?)|
                                 (?P<double>doubled.*?)|
                                 (?P<triple>tripled.*?)|
-                                (?P<go>((grounded.*?)|(sacrificed to.*?)))|
-                                (?P<sf>hit\ssacrifice.*?)|
+                                (?P<go>((grounded.*?)|(sacrificed\sto.*?)))|
+                                (?P<sf>((hit\ssacrifice.*?)|(flied\sout)))|
                                 (?P<walks>walked.*?)|
                                 (?P<hbp>hit\sby\spitch.*?)|
                                 (?P<passed>on\spassed\sball.*?)|
                                 (?P<wp>wild\spitch.*?)|
-                                (?P<fe>fielding\serror.*?)|
+                                (?P<fe>.*?fielding\serror.*?)|
                                 (?P<grd>ground\srule\sdouble.*?)|
                                 (?P<fc>fielder\'s\schoice.*?)|
                                 (?P<balk>.*?balk)|
+                                (?P<stolehome>.*?stole\shome)|
                                 (?P<itphr>inside\sthe\spark\shome\srun.*?)|
-                                (?P<error>((.*?error\,.*?)|(.*?error)))
+                                (?P<error>((.*?error\,.*?)|(.*?error)|(unknown\sinto.*?)))
                                 )$  # END.
                                 """, re.VERBOSE)
             m = lineregex.search(ev)  # this breaks up the line into player and (homerun|non-hr event)
@@ -584,6 +598,8 @@ class Hardball(callbacks.Plugin):
                         elif srmatch == 'walks':
                             runs = self._runmatchtext(srmatchtext)
                             rbitext = "walks. {0} run scores".format(runs)
+                        elif srmatch == 'stolehome':
+                            rbitext = "stole home"
                         elif srmatch == 'hbp':
                             runs = self._runmatchtext(srmatchtext)
                             rbitext = "hit by pitch. {0} run scores".format(runs)
