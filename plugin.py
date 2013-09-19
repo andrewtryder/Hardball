@@ -421,23 +421,6 @@ class Hardball(callbacks.Plugin):
     # YAHOO PLAYER INTERNALS #
     ##########################
 
-    def _yahoopid(self, pid):
-        """Fetch name if missing from DB."""
-
-        try:
-            url = b64decode('aHR0cDovL3Nwb3J0cy55YWhvby5jb20vbWxiL3BsYXllcnMv') + '%s' % (pid)
-            html = self._httpget(url)
-            if not html:
-                self.log.error("ERROR: _yahoopid: Could not fetch {0}".format(url))
-                return None
-            soup = BeautifulSoup(html)
-            pname = soup.find('li', attrs={'class':'player-name'}).getText().encode('utf-8').strip()
-            self.log.info("_yahoopid: We need to add PID: {0} as {1}".format(pid, pname))
-            return "{0}".format(pname)
-        except Exception, e:
-            self.log.error("ERROR: _yahoopid :: {0} :: {1}".format(pid, e))
-            return None
-
     def _yahooplayer(self, pid):
         """Handle the conversion between PID and name."""
 
@@ -452,10 +435,41 @@ class Hardball(callbacks.Plugin):
             pname = row[0].encode('utf-8')
         else:  # no player in the db.
             pname = self._yahoopid(pid)  # try yahoo fetch.
-            if not pname:  # we did not get back a pid.
-                pname = "None"  # need to yield something.
+            if pname:  # we did get something back from the fetch.
+                self._yahooplayerdbinject(pid, pname)  # inject the player into the db.
+            else:  # we did not get back a pid.
+                pname = None  # need to yield something.
         # return.
         return pname
+
+    def _yahoopid(self, pid):
+        """Fetch name via http if missing from DB."""
+
+        try:
+            url = b64decode('aHR0cDovL3Nwb3J0cy55YWhvby5jb20vbWxiL3BsYXllcnMv') + '%s' % (pid)
+            html = self._httpget(url)
+            if not html:
+                self.log.error("ERROR: _yahoopid: Could not fetch {0}".format(url))
+                return None
+            soup = BeautifulSoup(html)
+            pname = soup.find('div', attrs={'class':'player-info'}).find('h1').getText().encode('utf-8')
+            self.log.info("_yahoopid: We need to add PID: {0} as {1}".format(pid, pname))
+            return "{0}".format(pname)
+        except Exception, e:
+            self.log.error("ERROR: _yahoopid :: {0} :: {1}".format(pid, e))
+            return None
+
+    def _yahooplayerdbinject(self, pid, pname):
+        """Inject missing player-name and id into database."""
+
+        dbpath = os.path.abspath(os.path.dirname(__file__)) + '/db/players.db'
+        with sqlite3.connect(dbpath) as conn:
+            cursor = conn.cursor()
+            query = "INSERT OR REPLACE INTO players (id, name) VALUES  (?, ?)"
+            cursor.execute(query, (pid, pname,))
+            conn.commit()  # commit.
+        # log.
+        self.log.info("_yahooplayerdbinject :: I have added missing id {0} in as {1}".format(pid, pname))
 
     def _yahooplayerwrapper(self, pid):
         """Wrapper for scoring events where we must return a string instead of None."""
