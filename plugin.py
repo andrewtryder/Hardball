@@ -452,8 +452,8 @@ class Hardball(callbacks.Plugin):
                 self.log.error("ERROR: _yahoopid: Could not fetch {0}".format(url))
                 return None
             soup = BeautifulSoup(html)
+            #self.log.info("{0}".format(soup))
             pname = soup.find('div', attrs={'class':'player-info'}).find('h1').getText().encode('utf-8')
-            self.log.info("_yahoopid: We need to add PID: {0} as {1}".format(pid, pname))
             return "{0}".format(pname)
         except Exception, e:
             self.log.error("ERROR: _yahoopid :: {0} :: {1}".format(pid, e))
