@@ -389,8 +389,7 @@ class Hardball(callbacks.Plugin):
         if not fields:  # if, for some reason, the fields don't match.
             self.log.error("ERROR: _yahoofinal looking for fields in: %" % (endline))
             return None
-        # we do have fields, so lets process them and translate into players.
-        if fields:  # fields->pids.
+        else:  # we do have fields, so lets process them and translate into players. fields->pids.
             losing = self._yahooplayerwrapper(fields.groupdict()['losing'])
             winning = self._yahooplayerwrapper(fields.groupdict()['winning'])
             if fields.groupdict()['save'] != '0':  # if save is not 0 (ie: no save) so we grab it.
