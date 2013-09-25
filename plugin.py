@@ -420,7 +420,7 @@ class Hardball(callbacks.Plugin):
         # now check if channels is in the dataset from the pickle.
         if channel in dataset['channels']:  # it is. we're good.
             self.channels[channel] = dataset['channels'][channel]  # restore it.
-            irc.reply("I have successfully restored updates to: {0} ({1})".format(channel, self.channels[channel]))
+            irc.reply("I have successfully restored updates to: {0}".format(channel))
         else:
             irc.reply("ERROR: {0} is not in the saved channel list. Please use cfbchannel to add it.".format(channel))
 
