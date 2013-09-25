@@ -6,14 +6,16 @@
 #
 ###
 # my libs
-from __future__ import division  # so we're not Bankers rounding.
+import datetime  # time
+import pytz  # time
+from calendar import timegm  # time
 from base64 import b64decode
 import cPickle as pickle
-import datetime
-import re
-from BeautifulSoup import BeautifulSoup
-import sqlite3
-import os.path
+try:
+    import xml.etree.cElementTree as ElementTree
+except ImportError:
+    import xml.etree.ElementTree as ElementTree
+import json
 # extra supybot libs
 import supybot.conf as conf
 import supybot.schedule as schedule
@@ -46,9 +48,10 @@ class Hardball(callbacks.Plugin):
         # initial states for games.
         self.games = None
         self.nextcheck = None
-        # fetchhost system.
-        self.fetchhost = None
-        self.fetchhostcheck = None
+        # dupedict.
+        self.dupedict = {}
+        # base url.
+        self.baseurl = b64decode('aHR0cDovL2dkMi5tbGIuY29t')
         # fill in the blanks.
         if not self.games:
             self.games = self._fetchgames()
@@ -75,10 +78,11 @@ class Hardball(callbacks.Plugin):
     # INTERNAL FUNCTIONS #
     ######################
 
-    def _httpget(self, url, h=None, d=None, l=True):
+    def _httpget(self, url):
         """General HTTP resource fetcher. Pass headers via h, data via d, and to log via l."""
 
-        if self.registryValue('logURLs') and l:
+        l = False
+        if self.registryValue('logURLs') or l:
             self.log.info(url)
 
         try:
@@ -89,17 +93,36 @@ class Hardball(callbacks.Plugin):
             self.log.error("ERROR opening {0} message: {1}".format(url, e))
             return None
 
+    def _datestring(self):
+        """Figure out the datestring for main GD url."""
+
+        # now in UTC.
+        now = datetime.datetime.utcnow()
+        # test if we're after 1PM UTC. We do this since some games last until 4AM Eastern.
+        if 0 <= now.hour <= 12:  # between 0-12, go back one day.
+            base = now+datetime.timedelta(days=-1)
+        else:  # regular.
+            base = now
+        # now figure out the year, month, day strings.
+        dyear, dmonth, dday = base.strftime("%Y"), base.strftime("%m"), base.strftime("%d")
+        # return as tuple.
+        return (dyear, dmonth, dday)
+
+    def _convertUTC(self, dtstring):
+        """We convert our dtstrings in each game into UTC epoch seconds."""
+
+        naive = datetime.datetime.strptime(dtstring, "%Y/%m/%d %I:%M %p")  # 2013/09/21 7:08 PM
+        local = pytz.timezone("US/Eastern")  # times are localized in "Eastern"
+        local_dt = local.localize(naive, is_dst=None)  # tzize dtobj.
+        utc_dt = local_dt.astimezone(pytz.UTC) # convert from utc->local(tzstring).
+        rtrstr = timegm(utc_dt.utctimetuple())  # return epoch seconds/
+        return rtrstr
+
     def _utcnow(self):
         """Calculate Unix timestamp from GMT."""
 
         ttuple = datetime.datetime.utcnow().utctimetuple()
-        _EPOCH_ORD = datetime.date(1970, 1, 1).toordinal()
-        year, month, day, hour, minute, second = ttuple[:6]
-        days = datetime.date(year, month, 1).toordinal() - _EPOCH_ORD + day - 1
-        hours = days*24 + hour
-        minutes = hours*60 + minute
-        seconds = minutes*60 + second
-        return seconds
+        return timegm(ttuple)
 
     ###########################################
     # INTERNAL CHANNEL POSTING AND DELEGATION #
@@ -125,7 +148,7 @@ class Hardball(callbacks.Plugin):
                     message = "{0}{1}".format(self.registryValue('prefixString', postchan), message)
                 # now send  the actual output.
                 irc.queueMsg(ircmsgs.privmsg(postchan, message))
-            except Exception as e:
+            except Exception, e:
                 self.log.error("ERROR: Could not send {0} to {1}. {2}".format(message, postchan, e))
 
     ##############################
@@ -168,12 +191,14 @@ class Hardball(callbacks.Plugin):
     def _teams(self, team=None):
         """Main team database. Translates ID into team and can also return table."""
 
-        table = {'0':'ALL', '1':'BAL', '2':'BOS', '3':'LAA', '4':'CHW', '5':'CLE', '6':'DET',
-                 '7':'KC', '8':'MIL', '9':'MIN', '10':'NYY', '11':'OAK', '12':'SEA',
-                 '13':'TEX', '14':'TOR', '15':'ATL', '16':'CHC', '17':'CIN', '18':'HOU',
-                 '19':'LAD', '20':'WSH', '21':'NYM', '22':'PHI', '23':'PIT', '24':'STL',
-                 '25':'SD', '26':'SF', '27':'COL', '28':'MIA', '29':'ARI', '30':'TB',
-                 '31':'AL', '32':'NL'}
+        table = { '0':'ALL', # ALL.
+            '139':'TB', '110':'BAL', '135':'SD', '119':'LAD', '118':'KC', '140':'TEX',
+            '115':'COL', '109':'ARI', '112':'CHC', '144':'ATL', '108':'LAA', '136':'SEA',
+            '133':'OAK', '142':'MIN', '147':'NYY', '137':'SF', '134':'PIT', '113':'CIN',
+            '114':'CLE', '117':'HOU', '158':'MIL', '138':'STL', '120':'WSH', '146':'MIA',
+            '116':'DET', '145':'CWS', '143':'PHI', '121':'NYM', '111':'BOS', '141':'TOR',
+            '160':'NL', '159':'AL' # ASG.
+            }
         # return
         if team:  # if we got a team.
             if team in table:  # if we get a valid #, return the team.
@@ -209,604 +234,219 @@ class Hardball(callbacks.Plugin):
     # FETCH OPERATIONS #
     ####################
 
-    def _fetchhost(self):
-        """Return the host for fetch operations."""
-
-        utcnow = self._utcnow()
-        # if we don't have the host, lastchecktime, or fetchhostcheck has passed, we regrab.
-        if ((not self.fetchhostcheck) or (not self.fetchhost) or (self.fetchhostcheck < utcnow)):
-            url = b64decode('aHR0cDovL2F1ZC5zcG9ydHMueWFob28uY29tL2Jpbi9ob3N0bmFtZQ==')
-            html = self._httpget(url)  # try and grab.
-            if not html:
-                self.log.error("ERROR: _fetchhost: could not fetch {0}")
-                return None
-            # now that we have html, make sure its valid.
-            if html.startswith("aud"):
-                fhurl = 'http://%s' % (html.strip())
-                self.fetchhost = fhurl  # set the url.
-                self.fetchhostcheck = utcnow+3600  # 1hr from now.
-                return fhurl
-            else:
-                self.log.error("ERROR: _fetchhost: returned string didn't match aud. We got {0}".format(html))
-                return None
-        else:  # we have a host and it's under the cache time.
-            return self.fetchhost
-
     def _fetchgames(self):
-        """Return the games.txt data."""
+        """Return the games data."""
 
-        url = self._fetchhost()  # grab the host to check.
-        if not url:  # didn't get it back.
-            self.log.error("ERROR: _fetchgames broke on _fetchhost()")
-            return None
-        else:  # we got fetchhost. create the url.
-            url = "%s/mlb/games.txt" % (url)
-        # now we try and fetch the actual url with data.
+        # first, we need our year, month, date.
+        (dyear, dmonth, dday) = self._datestring()
+        # now construct the url.
+        url = self.baseurl + '/components/game/mlb/year_%s/month_%s/day_%s/master_scoreboard.json' % (dyear, dmonth, dday)
         html = self._httpget(url)
         if not html:
             self.log.error("ERROR: _fetchgames: could not fetch {0} :: {1}".format(url))
             return None
-        # now turn the "html" into a list of dicts.
-        newgames = self._txttodict(html)
-        if not newgames:  # no new games for some reason.
+        # we got something back.
+        try:  # try and decode the JSON.
+            tree = json.loads(html.decode('utf-8'))
+        except Exception, e:
+            self.log.error("_fetchgames :: Could not parse JSON :: {0}".format(e))
             return None
-        else:  # return newgames.
-            return newgames
-
-    def _txttodict(self, txt):
-        """Games game lines from fetchgames and turns them into a list of dicts."""
-
-        lines = txt.splitlines()
-        games = {}
-        # iterate over.
-        for i, line in enumerate(lines):
-            if line.startswith('g|'):  # only games.
-                concatline = "%s|%s" % (line, lines[i+1])  # +o|gid
-                cclsplit = concatline.split('|')  # split.
-                mlbid = int(cclsplit[1])  # key.
-                t = {}  # dict to put all values in.
-                t['awayt'] = cclsplit[4]
-                t['homet'] = cclsplit[5]
-                t['status'] = cclsplit[6]
-                t['start'] = int(cclsplit[8])
-                t['inning'] = int(cclsplit[9])
-                t['awayscore'] = cclsplit[10]
-                t['awayhits'] = cclsplit[11]
-                t['awaypit'] = cclsplit[13]
-                t['homescore'] = cclsplit[16]
-                t['homehits'] = cclsplit[17]
-                t['homepit'] = cclsplit[19]
-                t['gameid'] = cclsplit[30]
-                games[mlbid] = t
-        # process if we have games or not.
-        if len(games) == 0:  # no games.
-            self.log.error("ERROR: _txttodict: no games found.")
-            self.log.error("ERROR: _txttodict: {0}".format(txt))
-            self.log.info("ERROR: _txttodict: I found no games so I am backing off 1 hour.")
+        # JSON did parse. We have to mangle a few things before we can build the dict.
+        try:  # try to find the base.
+            games = tree['data']['games']
+        except Exception, e:
+            self.log.error("_fetchgames :: Could not parse games in JSON :: {0}".format(e))
+            return None
+        # we have games. We have to check if there are games today.
+        if ((not 'game' in games) or (len(games) == 0)):  # we found 'game', meaning there are games.
+            self.log.error("_fetchgames :: I did not find 'game' in games :: I got: {0}".format(games))
+            self.log.info("ERROR: _fetchgames: I found no games so I am backing off 1 hour.")
             self.nextcheck = self._utcnow()+3600
             return None
-        else:
-            return games
-
-    def _teamrecords(self):
-        """Fetch the table of team records for when a game begins."""
-
-        url = self._fetchhost()  # grab the host to check.
-        if not url:  # didn't get it back.
-            self.log.error("ERROR: _teamrecords broke on _fetchhost()")
-            return None
-        else:  # we got fetchhost. create the url.
-            url = "%s/mlb/teams.txt" % (url)
-        # now we try and fetch the actual url with data.
-        html = self._httpget(url)
-        if not html:
-            self.log.error("ERROR: _teamrecords: could not fetch {0} :: {1}".format(url))
-            return None
-        # now split the lines.
-        lines = html.splitlines()
-        if len(lines) == 0:
-            self.log.error("ERROR: _teamrecords could not find any lines in URL.")
-            return None
-        # dict to store everything in.
-        teamlines = {}
-        for line in lines:
-            if line.startswith('t'):  # only t lines.
-                s = line.split('|')
-                #teamlines[s[1]] = "({0}-{1}) (Home: {2}-{3}) (Away {4}-{5})".format(s[6], s[7], s[10], s[11], s[8], s[9])
-                teamlines[s[1]] = "{0}-{1}".format(s[6], s[7])  # make our dict with records.
-        # last, make sure we found stuff.
-        if len(teamlines) == 0:
-            self.log.error("ERROR: _teamrecords something broke making the dict of team records.")
-            return None
-        else:  # everything worked
-            return teamlines
-
-    def _pitchers(self):
-        """Fetch pitcher statlines."""
-
-        url = self._fetchhost()  # grab the host to check.
-        if not url:  # didn't get it back.
-            self.log.error("ERROR: _pitchers broke on _fetchhost()")
-            return None
-        else:  # we got fetchhost. create the url.
-            url = "%s/mlb/stats.txt" % (url)
-        # now we try and fetch the actual url with data.
-        html = self._httpget(url)
-        if not html:
-            self.log.error("ERROR: _teamrecords: could not fetch {0} :: {1}".format(url, e))
-            return None
-        # now split the lines
-        lines = html.splitlines()
-        if len(lines) == 0:
-            self.log.error("ERROR: _teamrecords could not find any lines in URL.")
-            return None
-        # store in dict so we can access via key.
-        pitchers = {}
-        for line in lines:
-            if line.startswith('k'):  # only k lines.
-                s = line.split('|')
-                # we calculate ERA below.
-                ip = float(s[2])
-                er = int(s[7])
-                if ip == "0.0":  # special case if ip is 0.
-                    era = float("0.00")  # would get divby0 error otherwise.
-                elif er == 0:  # special case if er is 0.
-                    era = float("0.00")  # would get divby0 also.
-                else:  # calculate it if we have otherwise.
-                    era = 9*(er/ip)  # ERA = 9 × (ER/IP)
-                # create statline.
-                statline = "{0}-{1}, {2:.2f}".format(s[8], s[9], era)
-                # make the dict.
-                pitchers[s[1]] = {'era': statline, 'saves':s[10]}
-        # make sure we have something to return.
-        if len(pitchers) == 0:
-            return None
-        else:  # return dict.
-            return pitchers
-
-    def _yahoofinal(self, gid):
-        """Handle final event messaging.."""
-
-        url = self._fetchhost()  # grab the host to check.
-        if not url:  # didn't get it back.
-            self.log.error("ERROR: _yahoofinal broke on _fetchhost()")
-            return None
-        else:  # we got fetchhost. create the url.
-            url = "%s/mlb/games.txt" % (url)
-        # now we grab the url.
-        html = self._httpget(url)
-        if not html:  # bail if we have nothing.
-            self.log.error("ERROR: _yahoofinal. I could not fetch for gid: %s" % gid)
-            return None
-        # now that we have the html, try and find the line we need.
-        endgame = re.search('^(z\|'+gid+'\|.*?)$', html, re.M|re.S)
-        if not endgame:  # bail if we don't have it.
-            self.log.error("ERROR: _yahoofinal looking for endgame but got: %s" % endgame)
-            return None
-        # we do have endgame regex so lets process it.
-        endline = endgame.group(1)
-        fields = re.search('^z\|\d+\|(?P<losing>\d+)\|(?P<winning>\d+)\|(?P<save>\d+)$', endline)
-        if not fields:  # if, for some reason, the fields don't match.
-            self.log.error("ERROR: _yahoofinal looking for fields in: %" % (endline))
-            return None
-        else:  # we do have fields, so lets process them and translate into players. fields->pids.
-            losing = self._yahooplayerwrapper(fields.groupdict()['losing'])
-            winning = self._yahooplayerwrapper(fields.groupdict()['winning'])
-            if fields.groupdict()['save'] != '0':  # if save is not 0 (ie: no save) so we grab it.
-                save = self._yahooplayerwrapper(fields.groupdict()['save'])
-            else:  # save was 0. (no Save.)
-                save = None
-            # lets decorate up the pitching with ERA + SAVE records.
-            pr = self._pitchers()  # should return a dict.
-            if pr:  # only manip if we get this back.
-                if str(fields.groupdict()['losing']) in pr:  # check for key membership.
-                    losing = "{0}({1})".format(losing, pr[str(fields.groupdict()['losing'])]['era'])
-                if str(fields.groupdict()['winning']) in pr:  # check for key membership.
-                    winning = "{0}({1})".format(winning, pr[str(fields.groupdict()['winning'])]['era'])
-                if save:
-                    if str(fields.groupdict()['save']) in pr:  # check for membership.
-                        save = "{0}({1})".format(save, pr[str(fields.groupdict()['save'])]['saves'])
-        # now, lets construct the actual return message.
-        if losing and winning and not save:  # just L and W. no save.
-            finalline = "W: {0} L: {1}".format(losing, winning)
-        elif losing and winning and save:  # W/L/S.
-            finalline = "W: {0} L: {1} S: {2}".format(losing, winning, save)
-        else:  # something failed above.
-            finalline = None
-        # last, we return whatever we have.
-        return finalline
-
-    ##########################
-    # YAHOO PLAYER INTERNALS #
-    ##########################
-
-    def _yahooplayer(self, pid):
-        """Handle the conversion between PID and name."""
-
-        # first, look for the player in the db by id.
-        dbpath = os.path.abspath(os.path.dirname(__file__)) + '/db/players.db'
-        with sqlite3.connect(dbpath) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT name FROM players WHERE id=?", (pid,))
-                row = cursor.fetchone()
-        # handle string/value.
-        if row:  # we have player in the db.
-            pname = row[0].encode('utf-8')
-        else:  # no player in the db.
-            pname = self._yahoopid(pid)  # try yahoo fetch.
-            if pname:  # we did get something back from the fetch.
-                self._yahooplayerdbinject(pid, pname)  # inject the player into the db.
-            else:  # we did not get back a pid.
-                pname = None  # need to yield something.
-        # return.
-        return pname
-
-    def _yahoopid(self, pid):
-        """Fetch name via http if missing from DB."""
-
-        try:
-            url = b64decode('aHR0cDovL3Nwb3J0cy55YWhvby5jb20vbWxiL3BsYXllcnMv') + '%s' % (pid)
-            html = self._httpget(url)
-            if not html:
-                self.log.error("ERROR: _yahoopid: Could not fetch {0}".format(url))
-                return None
-            soup = BeautifulSoup(html)
-            #self.log.info("{0}".format(soup))
-            pname = soup.find('div', attrs={'class':'player-info'}).find('h1').getText().encode('utf-8')
-            return "{0}".format(pname)
-        except Exception, e:
-            self.log.error("ERROR: _yahoopid :: {0} :: {1}".format(pid, e))
-            return None
-
-    def _yahooplayerdbinject(self, pid, pname):
-        """Inject missing player-name and id into database."""
-
-        dbpath = os.path.abspath(os.path.dirname(__file__)) + '/db/players.db'
-        with sqlite3.connect(dbpath) as conn:
-            cursor = conn.cursor()
-            query = "INSERT OR REPLACE INTO players (id, name) VALUES  (?, ?)"
-            cursor.execute(query, (pid, pname,))
-            conn.commit()  # commit.
-        # log.
-        self.log.info("_yahooplayerdbinject :: I have added missing id {0} in as {1}".format(pid, pname))
-
-    def _yahooplayerwrapper(self, pid):
-        """Wrapper for scoring events where we must return a string instead of None."""
-
-        pname = self._yahooplayer(pid)  # fetch.
-        if not pname:  # get None back.
-            pname = "player"
-        # return
-        return pname
+        else:  # we're good to go. last check is below due to a single vs. multiple games.
+            games = games['game']
+            if isinstance(games, dict):  # stupid stopgap here for single games.
+                games = [games]  # add that single game dict into a list.
+        # now we're ready to go.
+        g = {}  # base container.
+        # iterate over all entries.
+        for game in games:
+            t = {}  # tmp dict for each game.
+            gid = game['id']  # find our ID.
+            gametime = "{0} {1}".format(game['time_date'], game['hm_lg_ampm'])  # construct string.
+            t['gametime'] = self._convertUTC(gametime)  # add in string as UTC time.
+            t['scoringplays'] = game['game_data_directory'] + '/atv_runScoringPlays.xml'  # add in url.
+            status = game['status']['ind']
+            t['status'] = status  # this is the code.
+            # handle conditionals for status.
+            # unfortunately, mlb provides different json variables depending on the status.
+            # we only need certain ones for specific conditions, so we act accordingly.
+            # STATUSES: O = game just finished, F = final, S = future, P, PW = warmup, I = In Progress, PR = Rain, PY = Delayed start, DA = PPD
+            if status in ("O", "F"):  # FINAL/POST GAME
+                # innings
+                t['inning'] = int(game['status']['inning'])
+                if game['status']['top_inning'] == "N":
+                    t['inningfull'] = "B{0}".format(t['inning'])
+                else:  # top of the inning
+                    t['inningfull'] = "T{0}".format(t['inning'])
+                # PITCHING
+                # winning pitching.
+                t['wpitcher'] = game['winning_pitcher']['name_display_roster'].encode('utf-8')
+                t['wpitcherera'] = game['winning_pitcher']['era']
+                t['wpitcherwins'] = game['winning_pitcher']['wins']
+                t['wpitcherlosses'] = game['winning_pitcher']['losses']
+                # winning pitching.
+                t['lpitcher'] = game['losing_pitcher']['name_display_roster'].encode('utf-8')
+                t['lpitcherera'] = game['losing_pitcher']['era']
+                t['lpitcherwins'] = game['losing_pitcher']['wins']
+                t['lpitcherlosses'] = game['losing_pitcher']['losses']
+                # save_pitcher
+                t['spitcher'] = game['save_pitcher']['name_display_roster'].encode('utf-8')
+                t['spitchersaves'] = game['save_pitcher']['saves']
+                # SCORE
+                t['homescore'] = int(game['linescore']['r']['home'])
+                t['awayscore'] = int(game['linescore']['r']['away'])
+                # HITS
+                t['homehits'] = int(game['linescore']['h']['home'])
+                t['awayhits'] = int(game['linescore']['h']['away'])
+            elif status in ("S", "P", "PW", "PY"):  # BEFORE THE GAME.
+                # PITCHING.
+                # away pitching.
+                t['apitcher'] = game['away_probable_pitcher']['name_display_roster'].encode('utf-8')
+                t['apitcherera'] = game['away_probable_pitcher']['era']
+                t['apitcherwins'] = game['away_probable_pitcher']['wins']
+                t['apitcherlosses'] = game['away_probable_pitcher']['losses']
+                # home pitching.
+                t['hpitcher'] = game['home_probable_pitcher']['name_display_roster'].encode('utf-8')
+                t['hpitcherera'] = game['home_probable_pitcher']['era']
+                t['hpitcherwins'] = game['home_probable_pitcher']['wins']
+                t['hpitcherlosses'] = game['home_probable_pitcher']['losses']
+            elif status == "I":  # INPROGRESS.
+                # innings
+                t['inning'] = int(game['status']['inning'])
+                if game['status']['top_inning'] == "N":
+                    t['inningfull'] = "B{0}".format(t['inning'])
+                else:  # top of the inning
+                    t['inningfull'] = "T{0}".format(t['inning'])
+                # PITCHING
+                t['pitcher'] = game['pitcher']['name_display_roster'].encode('utf-8')
+                t['opitcher'] = game['opposing_pitcher']['name_display_roster'].encode('utf-8')
+                # SCORE
+                t['homescore'] = int(game['linescore']['r']['home'])
+                t['awayscore'] = int(game['linescore']['r']['away'])
+                # HITS
+                t['homehits'] = int(game['linescore']['h']['home'])
+                t['awayhits'] = int(game['linescore']['h']['away'])
+            # VARIABLES FOR ALL.
+            # handle hometeam.
+            t['home_loss'] = game['home_loss']
+            t['home_win'] = game['home_win']
+            t['hometeam'] = game['home_name_abbrev']
+            t['homeid'] = game['home_team_id']
+            # handle awayteam.
+            t['away_loss'] = game['away_loss']
+            t['away_win'] = game['away_win']
+            t['awayteam'] = game['away_name_abbrev']
+            t['awayid'] = game['away_team_id']
+            # finally, add it to the dict.
+            g[gid] = t
+        # now return the dict of dicts.
+        return g
 
     ##########################
     # SCORING EVENT HANDLING #
     ##########################
 
-    def _runmatchtext(self, txt):
-        """This takes a non-hr scoring event and parses the number of runs in it."""
-
-        # NEED TO ADD
-        # ERROR 2013-08-02T22:31:50 ERROR: _runmatchtext could not parse: scored on [8592]'s fielding error, [8874] out at second
-        # ERROR 2013-08-06T23:08:47 ERROR: _runmatchtext could not parse: scored on [8578]'s fielding error
-        # ERROR 2013-08-11T14:24:25 ERROR: _runmatchtext could not parse: scored on [9015]'s fielding error
-        # ERROR 2013-08-17T20:58:25 ERROR: _runmatchtext could not parse: scored on [8991]'s throwing error
-        # ERROR 2013-08-21T20:11:04 ERROR: _runmatchtext could not parse: scored, [7710] to second on [9007]'s fielding error
-        # ERROR 2013-08-23T21:05:10 ERROR: _runmatchtext could not parse: inside the park home run to shallow left
-        # ERROR 2013-08-28T21:15:57 ERROR: _runmatchtext could not parse: scored, [7511] to third on [7628]'s throwing error
-        # ERROR 2013-08-31T20:24:27 ERROR: _runmatchtext could not parse: scored, [9268] to second on [9115]'s fielding error
-        # ERROR 2013-09-04T16:34:45 ERROR: _runmatchtext could not parse: scored on [7276]'s throwing error
-        # ERROR 2013-09-13T20:22:15 ERROR: _runmatchtext could not parse: inside the park home run to deep right center
-
-        scoredregex = re.compile(r'(?P<three>\[\d+]\, \[\d+\] and \[\d+\] scored)|(?P<two>\[\d+\] and \[\d+\] scored)|(?P<one>(\[\d+\] scored))')
-        sruns = scoredregex.search(txt)
-        # regex or not.
-        if sruns:  # if regex matches, figure out runs.
-            if sruns.group('one'):
-                runs = 1
-            elif sruns.group('two'):
-                runs = 2
-            elif sruns.group('three'):
-                runs = 3
-        else:  # we didn't match so just say one run and log error.
-            self.log.error("ERROR: _runmatchtext could not parse: {0}".format(txt))
-            runs = 1
-        # return
-        return runs
-
-    def _gameevfetch(self, gid):
+    def _gameevfetch(self, spurl):
         """Handles scoring event parsing for output."""
 
-        url = self._fetchhost()  # grab the host to check.
-        if not url:  # didn't get it back.
-            self.log.error("ERROR: _fetchgames broke on _fetchhost()")
-            return None
-        else:  # we got fetchhost. create the url.
-            url = "%s/mlb/plays-%s.txt" % (url, gid)
+        # construct the url.
+        url = self.baseurl + spurl
         # now do our http fetch.
         html = self._httpget(url)
         if not html:
-            self.log.error("ERROR: Could not gameevfetch: {0} :: {1}".format(gid, e))
+            self.log.error("ERROR: _gameevfetch :: HTTP ERROR fetching: {0} :: {1}".format(url))
             return None
-        # process the lines.
-        lines = html.splitlines()  # split on \n.
-        scorelines = []  # put matching lines into list.
-        for line in lines:  # iterate over each.
-            if line.startswith('s'):  # only scoring.
-                linesplit = line.split('|')  # split line.
-                scorelines.append(linesplit)  # append.
-        # we now go about processing that last line.
-        if len(scorelines) == 0:  # make sure we have/found events.
+        # now lets try and parse the XML.
+        try:
+            tree = ElementTree.fromstring(html.decode('utf-8'))
+        except Exception, e:
+            self.log.error("_gameevfetch :: Could not parse XML from {0} :: {1}".format(url, e))
             return None
-        else:  # now grab the last and process.
-            lastline = scorelines[-1]  # grab the last item in scorelines list.
-            ev = lastline[6]  # event is always at 6.
-            # our approach below is to split the event by two parts. the first is always the RBI player.
-            # the second is mixed: it's either a 'scoring' event or a homerun. we regex each.
-            # line handles splitting these into either. sregex handles different scoring events using named groups.
-            # scored handles how many runs were scored in a non-homerun event.
-            # NEED TO ADD:
-            lineregex = re.compile(r'^\[(?P<p>\d+)\]\s((?P<h>homered.*?)|(?P<s>.*?))$')
-            sregex = re.compile(r"""
-                                (  # START.
-                                (?P<single>single.*?)|
-                                (?P<double>doubled.*?)|
-                                (?P<triple>tripled.*?)|
-                                (?P<go>((grounded.*?)|(sacrificed\sto.*?)))|
-                                (?P<sf>((hit\ssacrifice.*?)|(flied\sout)))|
-                                (?P<walks>walked.*?)|
-                                (?P<hbp>hit\sby\spitch.*?)|
-                                (?P<passed>on\spassed\sball.*?)|
-                                (?P<wp>wild\spitch.*?)|
-                                (?P<fe>.*?fielding\serror.*?)|
-                                (?P<grd>ground\srule\sdouble.*?)|
-                                (?P<fc>fielder\'s\schoice.*?)|
-                                (?P<balk>.*?balk)|
-                                (?P<stolehome>.*?stole\shome)|
-                                (?P<itphr>inside\sthe\spark\shome\srun.*?)|
-                                (?P<error>((.*?error\,.*?)|(.*?error)|(unknown\sinto.*?)))
-                                )$  # END.
-                                """, re.VERBOSE)
-            m = lineregex.search(ev)  # this breaks up the line into player and (homerun|non-hr event)
-            if not m:  # for whatever reason, if lineregex breaks, we should log it.
-                self.log.error("ERROR: lineregex didn't match on: {0}".format(ev))
-                return None
-            else:  # lineregex worked. we have two types of matches. a homerun or not.
-                if m.group('h'):  # if it was a homerun.
-                    h = m.group('h')  # h is our text in the homerun.
-                    runs = 1  # start with one base run.
-                    r = re.findall(r'(\[\d+\])', h)  # find [#] to count runs.
-                    runs += len(r)  # num of [id] is runs in the HR.
-                    if runs == 1:  # solo shot.
-                        rbitext = "solo homerun"
-                    elif runs == 4:  # runs 4 = grandslammer.
-                        rbitext = "grandslam"
-                    else:  # more than a solo homerun.
-                        rbitext = "{0}-run homerun.".format(runs)  # text to spit out.
-                elif m.group('s'):  # non-HR scoring plays.
-                    s = m.group('s')  # actual text.
-                    sr = sregex.search(s)  # search the text with scoring regex.
-                    if sr:  # if we match a named scoring event.
-                        srmatch = "".join([k for k,v in sr.groupdict().items() if v])  # find what named dict we matched.
-                        srmatchtext = sr.group(srmatch)  # grab the dict (value) with the matching text.
-                        # now, we conditionally handle events based on named groups in the regex from above.
-                        # it should blowup if something doesn't match, in which case I'll fix.
-                        ## FIX REGEXES:
-                        ## scoringregex did not match anything in [7560] hit an inside the park home run to deep right, [7939] scored
-                        if srmatch in ('single', 'double', 'triple'):
-                            runs = self._runmatchtext(srmatchtext)  # send the remaining text to determine runs.
-                            if runs == 1:  # conditional text. RBI dobule
-                                rbitext = "RBI {0}".format(srmatch)
-                            else:
-                                rbitext = "{0}RBI {1}".format(runs, srmatch)
-                        elif srmatch == 'itphr':
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "inside the park home run. {0} run(s) score".format(runs)
-                        elif srmatch == 'go':
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "grounds out. {0} run(s) score".format(runs)
-                        elif srmatch == 'sf':
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "sacrifice fly. {0} run(s) score".format(runs)
-                        elif srmatch == 'walks':
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "walks. {0} run scores".format(runs)
-                        elif srmatch == 'stolehome':
-                            rbitext = "stole home"
-                        elif srmatch == 'hbp':
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "hit by pitch. {0} run scores".format(runs)
-                        elif srmatch == 'passed':
-                            rbitext = "scored on passed ball"
-                        elif srmatch == 'wp':
-                            rbitext = "scored on wild pitch"
-                        elif srmatch == "balk":
-                            rbitext = "scored on a balk"
-                        elif srmatch == 'fe':
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "safe at first. {0} run(s) score".format(runs)
-                        elif srmatch == 'grd':
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "ground rule double. {0} run(s) score".format(runs)
-                        elif srmatch == 'fc':
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "fielder's choice. {0} run(s) score".format(runs)
-                        elif srmatch == 'error':
-                            outtext = srmatchtext.split(',')[0]  # everything before the comma.
-                            outtext = re.sub('\[(\d+)\]', lambda m: self._yahooplayerwrapper(m.group(1)), outtext)  # replace.
-                            runs = self._runmatchtext(srmatchtext)
-                            rbitext = "{0}. {1} run(s) scores.".format(outtext, runs)
-                    else:  # scoring regex did not match we output and log.
-                        self.log.error("ERROR: scoringregex did not match anything in {0}".format(ev))
-                        rbitext = re.sub('\[(\d+)\]', lambda m: self._yahooplayerwrapper(m.group(1)), s)  # replace [\d+] w/player.
-                        rbitext = "S: {0}".format(rbitext)
-                # now, we need to reconstruct things for output. p = player, inning, rbitext = text from above.
-                player = self._yahooplayerwrapper(m.group('p'))  # translate player # into player.
-                inning = self._inningscalc(int(lastline[3]))  # get inning from ev line.
-                # Finally, return something like: T6 - player scoring event.
-                return "{0} - {1} {2}".format(inning, player, rbitext)
-
-    ##########################################
-    # INTERNAL EVENT HANDLING AND FORMATTING #
-    ##########################################
-
-    def _inningscalc(self, inningno):
-        """Do some math to convert int innings into human-readable."""
-
-        if inningno%2 == 0:  # modulo.
-            tb = "T"  # even = top.
-        else:  # odd.
-            tb = "B"  # odd = bottom.
-        # to get the "inning" +1, /2, round up.
-        inning = round(((inningno+1)/2), 0)  # need future/division to make this work.
-        return "%s%d" % (tb, inning)  # returns stuff like T1, B3, etc.
-
-    def _delaystart(self, ev):
-        """Format a gamestring for output for going into a delay."""
-
-        at = self._teams(team=ev['awayt'])  # translate awayteam.
-        ht = self._teams(team=ev['homet'])  # translate hometeam.
-        inning = self._inningscalc(ev['inning'])  # translate inning.
-        status = ircutils.mircColor("DELAY", 'yellow')
-        msg = "{0}@{1} - {2} - {3}".format(at, ht, inning, status)
-        return msg
-
-    def _delayend(self, ev):
-        """Format a gamestring for output for going into a delay."""
-
-        at = self._teams(team=ev['awayt'])  # translate awayteam.
-        ht = self._teams(team=ev['homet'])  # translate hometeam.
-        inning = self._inningscalc(ev['inning'])  # translate inning.
-        status = ircutils.mircColor("RESUMED", 'green')
-        msg = "{0}@{1} - {2} - {3}".format(at, ht, inning, status)
-        return msg
-
-    def _gameextras(self, ev):
-        """Game is going to extras."""
-
-        at = self._teams(team=ev['awayt'])  # translate awayteam.
-        ht = self._teams(team=ev['homet'])  # translate hometeam.
-        msg = "{0} {1} @ {2} {3} - Going to extra innings.".format(at, ev['awayscore'], ht, ev['homescore'])
-        return msg
-
-    def _gamestart(self, ev):
-        """Format a gamestring for output for game starting."""
-
-        # translate home/awayteam from id -> TEAM
-        at = self._teams(team=ev['awayt'])
-        ht = self._teams(team=ev['homet'])
-        # do the same with the pitchers.
-        awaypit = self._yahooplayerwrapper(ev['awaypit'])
-        homepit = self._yahooplayerwrapper(ev['homepit'])
-        # next section tries to dress up team and pitcher stats.
-        tr = self._teamrecords()  # should return a dict of team records.
-        if tr:  # if we go get it back, manip at/ht
-            if ev['awayt'] in tr:  # make sure key is in dict.
-                at = "{0}({1})".format(at, tr[ev['awayt']])
-            if ev['homet'] in tr:  # also make sure its in there.
-                ht = "{0}({1})".format(ht, tr[ev['homet']])
-        # likewise, we try and find pitcher ERA/records.
-        pr = self._pitchers()  # should return a dict.
-        if pr:  # only manip if we get this back.
-            if ev['awaypit'] in pr:  # check for key membership.
-                awaypit = "{0}({1})".format(awaypit, pr[ev['awaypit']]['era'])
-            if ev['homepit'] in pr:  # check for key membership.
-                homepit = "{0}({1})".format(homepit, pr[ev['homepit']]['era'])
-        # now format the message for output.
-        starting = ircutils.mircColor("Starting", 'green')
-        if awaypit and homepit:
-            msg = "{0}@{1} - {2} vs {3} - T1 - {4}".format(at, ht,  awaypit, homepit, starting)
-        else:
-            msg = "{0}@{1} - T1 - {2}".format(at, ht, starting)
-        return msg
-
-    def _gameend(self, ev):
-        """Format a gamestring for output when game ends."""
-
-        # grab teams first.
-        at = self._teams(team=ev['awayt'])  # translate awayteam.
-        ht = self._teams(team=ev['homet'])  # translate hometeam.
-        # bold the winner.
-        if int(ev['awayscore']) > int(ev['homescore']):  # away won.
-            teamline = "{0} {1} @ {2} {3}".format(ircutils.bold(at), ircutils.bold(ev['awayscore']), ht, ev['homescore'])
-        elif int(ev['homescore']) > int(ev['awayscore']):  # home won.
-            teamline = "{0} {1} @ {2} {3}".format(at, ev['awayscore'], ircutils.bold(ht), ircutils.bold(ev['homescore']))
-        else:  # this should never happen but we do it to prevent against errors.
-            teamline = "{0} {1} @ {2} {3}".format(at, ev['awayscore'], ht, ev['homescore'])
-        # handle the inning and format it red, so it's like F/9.
-        inning = ircutils.mircColor("F/%.0f" % (round(((ev['inning']+1)/2), 0)), 'red')
-        # try and grab the finalline. use if it works.
-        finalline = self._yahoofinal(ev['gameid'])
-        # prep output.
-        if finalline:  # we got finalline back and working.
-            msg = "{0} - {1} - {2}".format(inning, teamline, finalline)
-        else:  # something broke with finalline.
-            self.log.error("ERROR: _gameend :: Could not _yahoofinal for {0}".format(ev['gameid']))
-            msg = "{0} - {1}".format(inning, teamline)
-        return msg
-
-    def _gamescore(self, ev):
-        """Format an event for outputting a scoring event."""
-
-        at = self._teams(team=ev['awayt'])  # translate awayteam.
-        ht = self._teams(team=ev['homet'])  # translate hometeam.
-        # now try and fetch the "scoring event"
-        gameev = self._gameevfetch(ev['gameid'])
-        if gameev:  # if it works and we get something back
-            msg = "{0} {1} @ {2} {3} - {4}".format(at, ev['awayscore'], ht, ev['homescore'], gameev)
-        else:  # gameev failed.
-            self.log.error("ERROR: _gamescore :: Could not _gamevfetch for {0}".format(ev['gameid']))
-            msg = "{0} {1} @ {2} {3}".format(at, ev['awayscore'], ht, ev['homescore'])
-        return msg
-
-    def _gamenohit(self, ev, pid):
-        """Formats a player-id for a no-hitter."""
-
-        at = self._teams(team=ev['awayt'])  # translate awayteam.
-        ht = self._teams(team=ev['homet'])  # translate hometeam.
-        inning = self._inningscalc(ev['inning'])  # translate inning.
-        player = self._yahooplayer(pid)  # try to fetch playername.
-        # figure out output.
-        if player:  # if we get player back.
-            message = "{0}@{1} - {2} - {3} {4}".format(at, ht, inning, ircutils.bold(player), ircutils.bold("has a no hitter going."))
-        else:  # no player.
-            message = "{0}@{1} - {2} - {3}".format(at, ht, inning, ircutils.bold("pitcher has a no hitter going."))
-
-        return message
+        # we can parse XML. Lets go and find the "last" scoring event.
+        scev = tree.findall('body/eventGroup/event')
+        if len(scev) == 0:  # make sure we found events...
+            self.log.error("ERROR: _gameevfetch: No scoring events found at {0}".format(url))
+            return None
+        else: # we did find events. lets return the 'last' and clean-up the text.
+            t = {}  # tmp dict.
+            t['title'] = scev[-1].find('title').text.encode('utf-8')  # type of scoring play. play below.
+            ev = scev[-1].find('description').text.encode('utf-8')  # find event and clean it up below.
+            t['event'] = utils.str.normalizeWhitespace(ev) #(ev.split('.', 1)[0])
+            #self.log.info("_gameevfetch :: {0}".format(t))
+            # return the dict.
+            return t
 
     #############################
     # PUBLIC CHANNEL OPERATIONS #
     #############################
 
-    def hardballstart(self, irc, msg, args):
+    def hardballon(self, irc, msg, args, channel):
         """
-        start or restart the Hardball timer and live reporting.
+        Re-enable hardball updates in channel.
+        Must be enabled by an op in the channel scores are already enabled for.
         """
 
-        def checkhardballcron():
-            self.checkhardball(irc)
+        # channel
+        channel = channel.lower()
+        # check if op.
+        if not irc.state.channels[channel].isOp(msg.nick):
+            irc.reply("ERROR: You must be an op in this channel for this command to work.")
+            return
+        # check if channel is already on.
+        if channel in self.channels:
+            irc.reply("ERROR: {0} is already enabled for hardball updates.".format(channel))
+        # we're here if it's not. let's re-add whatever we have saved.
+        # most of this is from _loadchannels
         try:
-            schedule.addPeriodicEvent(checkhardballcron, self.registryValue('checkInterval'), now=False, name='checkhardball')
-        except AssertionError:
-            irc.reply("The hardball checker was already running.")
+            datafile = open(conf.supybot.directories.data.dirize(self.name()+".pickle"), 'rb')
+            try:
+                dataset = pickle.load(datafile)
+            finally:
+                datafile.close()
+        except IOError:
+            irc.reply("ERROR: I could not open the hardball pickle to restore. Something went horribly wrong.")
+            return
+        # now check if channels is in the dataset from the pickle.
+        if channel in dataset['channels']:  # it is. we're good.
+            self.channels[channel] = dataset['channels'][channel]  # restore it.
+            irc.reply("I have successfully restored updates to: {0} ({1})".format(channel, self.channels[channel]))
         else:
-            irc.reply("Hardball checker started.")
+            irc.reply("ERROR: {0} is not in the saved channel list. Please use cfbchannel to add it.".format(channel))
 
-    hardballstart = wrap(hardballstart, [('checkCapability', 'admin')])
+    hardballon = wrap(hardballon, [('channel')])
 
-    def hardballstop(self, irc, msg, args):
+    def hardballoff(self, irc, msg, args, channel):
         """
-        start or restart the Hardball timer and live reporting.
+        Disable hardball scoring updates in a channel.
+        Must be issued by an op in a channel it is enabled for.
         """
 
-        try:
-            schedule.removeEvent('checkhardball')
-        except KeyError:
-            irc.reply("The hardball checker was not running.")
-        else:
-            irc.reply("Hardball checker stopped.")
+        # channel
+        channel = channel.lower()
+        # check if op.
+        if not irc.state.channels[channel].isOp(msg.nick):
+            irc.reply("ERROR: You must be an op in this channel for this command to work.")
+            return
+        # check if channel is already on.
+        if channel not in self.channels:
+            irc.reply("ERROR: {0} is not in self.channels. I can't disable updates for a channel I don't update in.".format(channel))
+            return
+        else:  # channel is in the dict so lets do a temp disable by deleting it.
+            del self.channels[channel]
+            irc.reply("I have successfully disabled hardball updates in {0}".format(channel))
 
-    hardballstop = wrap(hardballstop, [('checkCapability', 'admin')])
+    hardballoff = wrap(hardballoff, [('channel')])
 
     def hardballchannel(self, irc, msg, args, op, optchannel, optarg):
         """<add|list|del> <#channel> <ALL|TEAM>
@@ -869,14 +509,144 @@ class Hardball(callbacks.Plugin):
 
     hardballchannel = wrap(hardballchannel, [('checkCapability', 'admin'), ('somethingWithoutSpaces'), optional('channel'), optional('somethingWithoutSpaces')])
 
-    #def mlbgames(self, irc, msg, args):
-    def checkhardball(self, irc):
+    #########################
+    # GAME EVENT FORMATTERS #
+    #########################
+
+    def _boldleader(self, at, ats, ht, hts):
+        """Helper to bold the leader."""
+
+        # bold the winner.
+        if int(ats) > int(hts): # away team winning.
+            teamline = "{0} {1} @ {2} {3}".format(ircutils.bold(at), ircutils.bold(ats), ht, hts)
+        elif int(hts) > int(ats): # home team winning.
+            teamline = "{0} {1} @ {2} {3}".format(at, ats, ircutils.bold(ht), ircutils.bold(hts))
+        else: # this should never happen but we do it to prevent against errors.
+            teamline = "{0} {1} @ {2} {3}".format(at, ats, ht, hts)
+        # now return
+        return teamline
+
+    def _gamestart(self, ev):
+        """Handle a game starting."""
+
+        # construct the teams w/records.
+        at = "{0}({1}-{2})".format(ev['awayteam'], ev['away_win'], ev['away_loss'])
+        ht = "{0}({1}-{2})".format(ev['hometeam'], ev['home_win'], ev['home_loss'])
+        # construct pitching w/w-l + era.
+        ap = "{0} ({1}-{2}, {3})".format(ev['apitcher'], ev['apitcherwins'], ev['apitcherlosses'], ev['apitcherera'])
+        hp = "{0} ({1}-{2}, {3})".format(ev['hpitcher'], ev['hpitcherwins'], ev['hpitcherlosses'], ev['hpitcherera'])
+        # rest of the string
+        m = "{0} @ {1} :: {2} v. {3} :: {4}".format(at, ht, ap, hp, ircutils.mircColor("STARTING", 'green'))
+        # return the string.
+        return m
+
+    def _gamefinish(self, ev):
+        """Handle a game finishing."""
+
+        finalstr = "F/{0}".format(ev['inning'])  # make final string.
+        # pitching here. conditional if we have a save pitcher or not.
+        wp = "{0}({1}-{2}, {3})".format(ev['wpitcher'], ev['wpitcherwins'], ev['wpitcherlosses'], ev['wpitcherera'])
+        lp = "{0}({1}-{2}, {3})".format(ev['lpitcher'], ev['lpitcherwins'], ev['lpitcherlosses'], ev['lpitcherera'])
+        if ev['spitcher'] == "":  # empty so no save.
+            pitching = "W: {0}  L: {1}".format(wp, lp)
+        else:  # have save pitcher.
+            pitching = "W: {0}  L: {1}  S: {2}({3})".format(wp, lp, ev['spitcher'], ev['spitchersaves'])
+        # bold the leader.
+        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
+        # construct the string.
+        m = "{0} :: {1} :: {2}".format(bl, pitching, ircutils.mircColor(finalstr, 'red'))
+        # return.
+        return m
+
+    def _gamescore(self, ev):
+        """Handles a scoring event."""
+
+        # first, bold the leader (prefix part)
+        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
+        # now try and fetch the "scoring event"
+        gameev = self._gameevfetch(ev['scoringplays'])
+        if gameev: # if it works and we get something back
+            m = "{0} - {1} :: {2} :: {3}".format(bl, ev['inningfull'], gameev['title'], gameev['event'])
+        else: # gameev failed. just print the score.
+            self.log.error("ERROR: _gamescore :: Could not _gamevfetch for {0}".format(ev['id']))
+            m = "{0} - {1}".format(bl, ev['inningfull'],)
+        # return.
+        return m
+
+    def _extrainnings(self, ev):
+        """Handles a game going to extras."""
+
+        t = "{0} {1} @ {2} {3}".format(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
+        m = "{0} - {1} :: {2}".format(t, ev['inningfull'], ircutils.bold("EXTRA INNINGS"))
+        # return.
+        return m
+
+    def _gamedelay(self, ev):
+        """Handles game going into a delay."""
+
+        # bold leader.
+        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
+        # build string.
+        m = "{0} - {1} :: {2}".format(bl, ev['inningfull'], ircutils.mircColor("DELAY", 'yellow'))
+        # return
+        return m
+
+    def _gameresume(self, ev):
+        """Handles game coming out of a delay."""
+
+        # bold leader.
+        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
+        # build string.
+        m = "{0} - {1} :: {2}".format(bl, ev['inningfull'], ircutils.mircColor("RESUMED", 'green'))
+        # return
+        return m
+
+    def _gameppd(self, ev):
+        """Handles game going PPD."""
+
+        # bold leader.
+        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
+        # build string.
+        m = "{0} - {1} :: {2}".format(bl, ev['inningfull'], ircutils.mircColor("PPD", 'yellow'))
+        # return
+        return m
+
+    def _nohitter(self, ev, nhteam, nhpitcher):
+        """Handles game with no-hitter going on."""
+
+        # bold leader.
+        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
+        # now create the string.
+        m = "{0} - {1} - {2}({3}) :: {4}".format(bl, ev['inningfull'], nhpitcher, nhteam, ircutils.bold("NO-HITTER GOING ON"))
+        return m
+
+    #################
+    # MAIN FUNCTION #
+    #################
+
+    def hbcheck(self, irc, msg, args):
+        """
+        .
+        """
+
+        irc.reply("NEXTCHECK: {0}".format(self.nextcheck))
+        if len(self.games) == 0:
+            irc.reply("I have nothing in self.games")
+        else:
+            for (i, x) in self.games.items():
+                irc.reply("{0} :: {1}".format(i, x))
+
+    hbcheck = wrap(hbcheck)
+
+    def checkhardball(self, irc, msg, args):
+    #def checkhardball(self, irc):
         """Main handling function."""
 
         # next, before we even compare, we should see if there is a backoff time.
         if self.nextcheck:  # if present. should only be set when we know something in the future.
             utcnow = self._utcnow()  # grab UTC now.
             if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
+                self.log.info("checkhardball: nextcheck is in the future")
                 return  # bail.
             else:  # we are past when we should be holding off checking.
                 self.log.info("checkhardball: past nextcheck time so we're resetting it.")
@@ -901,59 +671,102 @@ class Hardball(callbacks.Plugin):
         # looking for differences (events). each event is then handled properly.
         for (k, v) in games1.items():  # iterate through self.games.
             if k in games2:  # match up keys because we don't know the frequency of the games/list changing.
-                # scoring change events.
-                if (v['awayscore'] != games2[k]['awayscore']) or (v['homescore'] != games2[k]['homescore']):
-                    # bot of 9th or above. (WALKOFF) (inning = 17+ (Bot 9th), homescore changes and is > than away.
-                    if ((int(games2[k]['inning']) > 16) and (v['homescore'] != games2[k]['homescore']) and (int(games2[k]['homescore']) > int(games2[k]['awayscore']))):
-                        message = "{0} - {1}".format(self._gamescore(games2[k]), ircutils.bold(ircutils.underline("WALK-OFF")))
-                        self._post(irc, v['awayt'], v['homet'], message)
-                    else:  # regular scoring event.
-                        message = self._gamescore(games2[k])
-                        self._post(irc, v['awayt'], v['homet'], message)
-                # game is going to extras.
-                if ((v['inning'] == 17) and (games2[k]['inning'] == 18)):  # post on inning change ONLY.
-                    message = self._gameextras(games2[k])
-                    self._post(irc, v['awayt'], v['homet'], message)
-                # game status change.
-                if (v['status'] != games2[k]['status']):  # F = finished, O = PPD, D = Delay, S = Future
-                    if ((v['status'] == 'S') and (games2[k]['status'] == 'P')):  # game starts.
+                # ACTIVE GAME EVENTS ONLY (INCLUDING IF GOING FINAL)
+                if ((v['status'] == "I") and (games2[k]['status'] in ("I", "O", "F"))):
+                    # FIRST, MAKE SURE THE GAME IS IN DUPEDICT.
+                    if k not in self.dupedict:
+                        self.log.info("ACTIVE GAME :: {0} is not in dupedict. Adding it.".format(k))
+                        self.dupedict[k] = ""
+                    # SCORING EVENTS. WE CHECK IF ITS A WALK-OFF.
+                    if ((v['awayscore'] < games2[k]['awayscore']) or (v['homescore'] < games2[k]['homescore'])):
+                        self.log.info("{0} should post scoring event".format(k))
+                        # CHECK IF ITS A WALK-OFF.
+                        if ((games2[k]['inning'] > 8) and (v['homescore'] != games2[k]['homescore']) and (games2[k]['homescore'] > games2[k]['awayscore'])):  # WO.
+                            mstr = "{0} - {1}".format(self._gamescore(games2[k]), ircutils.bold(ircutils.underline("WALK-OFF")))
+                        else:  # NOT A WALKOFF. IE: REGULAR SCORING EVENT.
+                            mstr = self._gamescore(games2[k])
+                        # POST
+                        self._post(irc, v['awayid'], v['homeid'], mstr)
+                    # GAME IS GOING TO EXTRAS.
+                    if ((v['inning'] != games2[k]['inning']) and (games2[k]['inningfull'] == "T10")):
+                        self.log.info("{0} is  going into extra innings.".format(k))
+                        mstr = self._extrainnings(games2[k])
+                        self._post(irc, v['awayid'], v['homeid'], mstr)
+                    # NO HITTER CHECK HERE. WE ONLY CHECK FROM THE 6TH INNING AND ON.
+                    if ((v['inningfull'] != games2[k]['inningfull']) and (games2[k]['inning'] > 5) and ((games2[k]['homehits'] == 0) or (games2[k]['awayhits'] == 0))):
+                        self.log.info("{0} no hitter somewhere in here.".format(k))
+                        # DETERMINE WHICH PITCHER HAS A NO-HITTER GOING ON.
+                        if (games2[k]['homehits'] == 0):  # away no-hitter.
+                            nhteam = 'awayteam'
+                            nhinning = "B{0}".format(games2[k]['inning'])
+                        else:  # home pitcher no-hitter.
+                            nhteam = 'hometeam'
+                            nhinning = "T{0}".format(games2[k]['inning'])
+                        # NOW SEE IF WE JUST CHANGED TO THAT INNING SO WE DON'T SPAM NOTIFICATION.
+                        # This is so we ONLY print the NH at top of inning nh pitcher is in.
+                        if (games2[k]['inningfull'] == nhinning):
+                            # grab our variables.
+                            nhteam = games2[k][nhteam]
+                            nhpitcher = games2[k]['pitcher']
+                            # log the event.
+                            self.log.info("{0} {1}({2}) has a no hitter going on.".format(k, nhpitcher, nhteam))
+                            # create string for output.
+                            mstr = self._nohitter(games2[k], nhteam, nhpitcher)
+                            self._post(irc, v['awayid'], v['homeid'], mstr)
+                        else:  # debug
+                            self.log.info("{0} has a no hitter going on but wrong inning.".format(k))
+                # GAME STATUS CHANGES (NON-ACTIVE EVENTS)
+                if (v['status'] != games2[k]['status']):
+                    # GAME STARTS
+                    if (games2[k]['status'] == 'I'):
                         self.log.info("{0} is starting.".format(k))
-                        message = self._gamestart(games2[k])
-                        self._post(irc, v['awayt'], v['homet'], message)
-                    elif ((v['status'] == "P") and (games2[k]['status'] == 'F')):  # game finishes.
-                        self.log.info("{0} is ending.".format(k))
-                        message = self._gameend(games2[k])
-                        self._post(irc, v['awayt'], v['homet'], message)
-                    elif ((v['status'] in ('P', 'S')) and (games2[k]['status'] == 'D')):  # game goes into delay.
-                        message = self._delaystart(games2[k])
-                        self._post(irc, v['awayt'], v['homet'], message)
-                    elif ((v['status'] == 'D') and (games2[k]['status'] == 'P')):  # game comes out of delay.
-                        message = self._delayend(games2[k])
-                        self._post(irc, v['awayt'], v['homet'], message)
-                # no hitter. check after top of 6th (10) inning.
-                if ((v['inning'] > 9) and ((v['homehits'] == '0') or (v['awayhits'] == '0'))):
-                    if (v['inning'] != games2[k]['inning']):  # post on inning change ONLY.
-                        # now handle which pitcher.
-                        if (games2[k]['homehits'] == '0'):  # away pitcher no-hitter.
-                            message = self._gamenohit(games2[k], v['awaypit'])
-                            self._post(irc, v['awayt'], v['homet'], message)
-                        if (games2[k]['awayhits'] == '0'):  # home pitcher no hitter.
-                            message = self._gamenohit(games2[k], v['homepit'])
-                            self._post(irc, v['awayt'], v['homet'], message)
+                        # now put k in dupedict.
+                        if k not in self.dupedict:
+                            mstr = self._gamestart(v)
+                            self._post(irc, v['awayid'], v['homeid'], mstr)
+                            self.dupedict[k] = ""
+                        else:
+                            self.log.info("{0} is starting but I already had it in dupedict.".format(k))
+                    # GAME FINISHES
+                    elif (games2[k]['status'] in ('O', 'F')):
+                        self.log.info("{0} is going Final.".format(k))
+                        # now test if k is in dupedict.
+                        if k in self.dupedict:  # key is in the dupedict, which is good, so we post.
+                            mstr = self._gamefinish(games2[k])
+                            self._post(irc, v['awayid'], v['homeid'], mstr)
+                            del self.dupedict[k]  # delete the key now.
+                        else:
+                            self.log.info("dupedict: ERROR: {0} is not in dupedict.".format(k))
+                    # GAME INTO DELAY.
+                    elif (games2[k]['status'] == 'PR'):
+                        self.log.info("{0} is going into a delay.".format(k))
+                        mstr = self._gamedelay(games2[k])
+                        self._post(irc, v['awayid'], v['homeid'], mstr)
+                    # GAME COMES OUT OF A DELAY
+                    elif (v['status'] == 'PR'):
+                        self.log.info("{0} is coming out of a delay.".format(k))
+                        mstr = self._gameresume(games2[k])
+                        self._post(irc, v['awayid'], v['homeid'], mstr)
+                    # GAME GOES TO PPD.
+                    elif (games2[k]['status'] == 'DA'):
+                        self.log.info("{0} is PPD.".format(k))
+                        mstr = self._gameppd(games2[k])
+                        self._post(irc, v['awayid'], v['homeid'], mstr)
 
         # now that we're done checking changes, copy the new into self.games to check against next time.
         self.games = games2
         # last, before we reset to check again, we need to verify some states of games in order to set sentinel or not.
-        # STATUSES: S = future, P = playing, F = final, D = delay
+        # STATUSES: O = game just finished, F = final, S = future, P, PW = warmup, I = In Progress, PR = Rain, PY = Delayed start, DA = PPD
         # first, we grab all the statuses in newgames (games2)
         gamestatuses = set([v['status'] for (k, v) in games2.items()])
+        self.log.info("GAMESTATUSES: {0}".format(gamestatuses))
         # next, check what the statuses of those games are and act accordingly.
-        if (('D' in gamestatuses) or ('P' in gamestatuses)):  # if any games are being played or in a delay, act normal.
+        if (('PR' in gamestatuses) or ('I' in gamestatuses) or ('P' in gamestatuses) or ('PW' in gamestatuses)):  # act normal if: rain delay, in-progress, warmups.
             self.nextcheck = None  # set to None to make sure we're checking on normal time.
         else:  # no games that are active or in delay.
             utcnow = self._utcnow()  # grab UTC now.
             if 'S' in gamestatuses:  # we do have games in the future (could be either before the slate or after day games are done and before night ones).
-                firstgametime = sorted([f['start'] for (i, f) in games2.items() if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
+                firstgametime = sorted([f['gametime'] for (i, f) in games2.items() if f['status'] == "S"])[0]  # get all start times with S, first (earliest).
                 if firstgametime > utcnow:   # make sure it is in the future so lock is not stale.
                     self.log.info("checkhardball: we have games in the future (S) so we're setting the next check {0} seconds from now".format(firstgametime-utcnow))
                     self.nextcheck = firstgametime  # set to the "first" game with 'S'.
@@ -965,9 +778,11 @@ class Hardball(callbacks.Plugin):
                     else:  # over an hour so we set firstgametime an hour from now.
                         self.log.info("checkhardball: firstgametime is over an hour from now so we're going to backoff for an hour")
                         self.nextcheck = utcnow+3600
-            else:  # everything is "F" (Final). we want to backoff so we're not flooding.
+            else:  # everything is "O" (Over) or "F" (Final) or "DA" (PPD). we want to backoff so we're not flooding.
                 self.log.info("checkhardball: no active games and I have not got new games yet, so I am holding off for 10 minutes.")
                 self.nextcheck = utcnow+600  # 10 minutes from now.
+
+    checkhardball = wrap(checkhardball)
 
 Class = Hardball
 
