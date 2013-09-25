@@ -624,22 +624,8 @@ class Hardball(callbacks.Plugin):
     # MAIN FUNCTION #
     #################
 
-    def hbcheck(self, irc, msg, args):
-        """
-        .
-        """
-
-        irc.reply("NEXTCHECK: {0}".format(self.nextcheck))
-        if len(self.games) == 0:
-            irc.reply("I have nothing in self.games")
-        else:
-            for (i, x) in self.games.items():
-                irc.reply("{0} :: {1}".format(i, x))
-
-    hbcheck = wrap(hbcheck)
-
-    def checkhardball(self, irc, msg, args):
-    #def checkhardball(self, irc):
+    #def checkhardball(self, irc, msg, args):
+    def checkhardball(self, irc):
         """Main handling function."""
 
         # next, before we even compare, we should see if there is a backoff time.
@@ -782,7 +768,7 @@ class Hardball(callbacks.Plugin):
                 self.log.info("checkhardball: no active games and I have not got new games yet, so I am holding off for 10 minutes.")
                 self.nextcheck = utcnow+600  # 10 minutes from now.
 
-    checkhardball = wrap(checkhardball)
+    #checkhardball = wrap(checkhardball)
 
 Class = Hardball
 
