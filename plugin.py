@@ -628,6 +628,8 @@ class Hardball(callbacks.Plugin):
     def checkhardball(self, irc):
         """Main handling function."""
 
+        self.log.info("checkhardball: starting check.")
+
         # next, before we even compare, we should see if there is a backoff time.
         if self.nextcheck:  # if present. should only be set when we know something in the future.
             utcnow = self._utcnow()  # grab UTC now.
