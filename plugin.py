@@ -584,30 +584,24 @@ class Hardball(callbacks.Plugin):
     def _gamedelay(self, ev):
         """Handles game going into a delay."""
 
-        # bold leader.
-        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
-        # build string.
-        m = "{0} - {1} :: {2}".format(bl, ev['inningfull'], ircutils.mircColor("DELAY", 'yellow'))
+        # build string
+        m = "{0}@{1} :: {2}".format(ev['awayteam'], ev['hometeam'], ircutils.mircColor("DELAY", 'yellow'))
         # return
         return m
 
     def _gameresume(self, ev):
         """Handles game coming out of a delay."""
 
-        # bold leader.
-        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
         # build string.
-        m = "{0} - {1} :: {2}".format(bl, ev['inningfull'], ircutils.mircColor("RESUMED", 'green'))
+        m = "{0}@{1} :: {2}".format(ev['awayteam'], ev['hometeam'], ircutils.mircColor("RESUMED", 'green'))
         # return
         return m
 
     def _gameppd(self, ev):
         """Handles game going PPD."""
 
-        # bold leader.
-        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
         # build string.
-        m = "{0} - {1} :: {2}".format(bl, ev['inningfull'], ircutils.mircColor("PPD", 'yellow'))
+        m = "{0}@{1} :: {2}".format(ev['awayteam'], ev['hometeam'], ircutils.mircColor("PPD", 'red'))
         # return
         return m
 
@@ -726,20 +720,20 @@ class Hardball(callbacks.Plugin):
                         else:
                             self.log.info("dupedict: ERROR: {0} is not in dupedict.".format(k))
                     # GAME INTO DELAY.
-                    #elif (games2[k]['status'] == 'PR'):
-                    #    self.log.info("{0} is going into a delay.".format(k))
-                    #    mstr = self._gamedelay(games2[k])
-                    #    self._post(irc, v['awayid'], v['homeid'], mstr)
+                    elif (games2[k]['status'] == 'PR'):
+                        self.log.info("{0} is going into a delay.".format(k))
+                        mstr = self._gamedelay(games2[k])
+                        self._post(irc, v['awayid'], v['homeid'], mstr)
                     # GAME COMES OUT OF A DELAY
-                    #elif (v['status'] == 'PR'):
-                    #    self.log.info("{0} is coming out of a delay.".format(k))
-                    #    mstr = self._gameresume(games2[k])
-                    #    self._post(irc, v['awayid'], v['homeid'], mstr)
+                    elif (v['status'] == 'PR'):
+                        self.log.info("{0} is coming out of a delay.".format(k))
+                        mstr = self._gameresume(games2[k])
+                        self._post(irc, v['awayid'], v['homeid'], mstr)
                     # GAME GOES TO PPD.
-                    #elif (games2[k]['status'] == 'DA'):
-                    #    self.log.info("{0} is PPD.".format(k))
-                    #    mstr = self._gameppd(games2[k])
-                    #    self._post(irc, v['awayid'], v['homeid'], mstr)
+                    elif (games2[k]['status'] == 'DA'):
+                        self.log.info("{0} is PPD.".format(k))
+                        mstr = self._gameppd(games2[k])
+                        self._post(irc, v['awayid'], v['homeid'], mstr)
 
         # now that we're done checking changes, copy the new into self.games to check against next time.
         self.games = games2
