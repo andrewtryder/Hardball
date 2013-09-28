@@ -736,10 +736,10 @@ class Hardball(callbacks.Plugin):
                     #    mstr = self._gameresume(games2[k])
                     #    self._post(irc, v['awayid'], v['homeid'], mstr)
                     # GAME GOES TO PPD.
-                    elif (games2[k]['status'] == 'DA'):
-                        self.log.info("{0} is PPD.".format(k))
-                        mstr = self._gameppd(games2[k])
-                        self._post(irc, v['awayid'], v['homeid'], mstr)
+                    #elif (games2[k]['status'] == 'DA'):
+                    #    self.log.info("{0} is PPD.".format(k))
+                    #    mstr = self._gameppd(games2[k])
+                    #    self._post(irc, v['awayid'], v['homeid'], mstr)
 
         # now that we're done checking changes, copy the new into self.games to check against next time.
         self.games = games2
