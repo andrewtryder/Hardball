@@ -726,15 +726,15 @@ class Hardball(callbacks.Plugin):
                         else:
                             self.log.info("dupedict: ERROR: {0} is not in dupedict.".format(k))
                     # GAME INTO DELAY.
-                    elif (games2[k]['status'] == 'PR'):
-                        self.log.info("{0} is going into a delay.".format(k))
-                        mstr = self._gamedelay(games2[k])
-                        self._post(irc, v['awayid'], v['homeid'], mstr)
+                    #elif (games2[k]['status'] == 'PR'):
+                    #    self.log.info("{0} is going into a delay.".format(k))
+                    #    mstr = self._gamedelay(games2[k])
+                    #    self._post(irc, v['awayid'], v['homeid'], mstr)
                     # GAME COMES OUT OF A DELAY
-                    elif (v['status'] == 'PR'):
-                        self.log.info("{0} is coming out of a delay.".format(k))
-                        mstr = self._gameresume(games2[k])
-                        self._post(irc, v['awayid'], v['homeid'], mstr)
+                    #elif (v['status'] == 'PR'):
+                    #    self.log.info("{0} is coming out of a delay.".format(k))
+                    #    mstr = self._gameresume(games2[k])
+                    #    self._post(irc, v['awayid'], v['homeid'], mstr)
                     # GAME GOES TO PPD.
                     elif (games2[k]['status'] == 'DA'):
                         self.log.info("{0} is PPD.".format(k))
