@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 ###
-# Copyright (c) 2013, spline
+# Copyright (c) 2013-2014, spline
 # All rights reserved.
 #
 #
@@ -628,7 +628,7 @@ class Hardball(callbacks.Plugin):
         if self.nextcheck:  # if present. should only be set when we know something in the future.
             utcnow = self._utcnow()  # grab UTC now.
             if self.nextcheck > utcnow:  # we ONLY abide by nextcheck if it's in the future.
-                self.log.info("checkhardball: nextcheck is in the future")
+                self.log.info("checkhardball: nextcheck is {0}s in the future".format(abs(self.nextcheck-utcnow)))
                 return  # bail.
             else:  # we are past when we should be holding off checking.
                 self.log.info("checkhardball: past nextcheck time so we're resetting it.")
