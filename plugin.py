@@ -89,8 +89,8 @@ class Hardball(callbacks.Plugin):
             h = {"User-Agent":"Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:17.0) Gecko/20100101 Firefox/17.0"}
             page = utils.web.getUrl(url, headers=h)
             return page
-        except utils.web.Error as e:
-            self.log.error("ERROR opening {0} message: {1}".format(url, e))
+        except Exception, e:
+            self.log.error("_httpget: ERROR opening {0} message: {1}".format(url, e))
             return None
 
     def _datestring(self):
@@ -243,24 +243,24 @@ class Hardball(callbacks.Plugin):
         url = self.baseurl + '/components/game/mlb/year_%s/month_%s/day_%s/master_scoreboard.json' % (dyear, dmonth, dday)
         html = self._httpget(url)
         if not html:
-            self.log.error("ERROR: _fetchgames: could not fetch {0} :: {1}".format(url))
+            self.log.error("ERROR: _fetchgames :: could not fetch {0} :: {1}".format(url))
             return None
         # we got something back.
         try:  # try and decode the JSON.
             tree = json.loads(html.decode('utf-8'))
         except Exception, e:
-            self.log.error("_fetchgames :: Could not parse JSON :: {0}".format(e))
+            self.log.info("_fetchgames :: Could not parse JSON :: {0}".format(e))
             return None
         # JSON did parse. We have to mangle a few things before we can build the dict.
         try:  # try to find the base.
             games = tree['data']['games']
         except Exception, e:
-            self.log.error("_fetchgames :: Could not parse games in JSON :: {0}".format(e))
+            self.log.info("_fetchgames :: Could not parse games in JSON :: {0}".format(e))
             return None
         # we have games. We have to check if there are games today.
         if ((not 'game' in games) or (len(games) == 0)):  # we found 'game', meaning there are games.
-            self.log.error("_fetchgames :: I did not find 'game' in games :: I got: {0}".format(games))
-            self.log.info("ERROR: _fetchgames: I found no games so I am backing off 1 hour.")
+            self.log.info("_fetchgames :: I did not find 'game' in games :: I got: {0}".format(games))
+            self.log.info("ERROR _fetchgames :: I found no games so I am backing off 1 hour.")
             self.nextcheck = self._utcnow()+3600
             return None
         else:  # we're good to go. last check is below due to a single vs. multiple games.
@@ -273,6 +273,17 @@ class Hardball(callbacks.Plugin):
         for game in games:
             t = {}  # tmp dict for each game.
             gid = game['id']  # find our ID.
+            # lets do gametype here. types:
+            # E = exhibition, R = regular season, A = ASG, F = wildcard , D = NLDS/ALDS, L = NLCS/ALCS, W = WS
+            # tiebreak is still a regular-season game. game_type="R" tiebreaker_sw="Y" <- normally N.
+            # we should grab description if it's not an E or R.
+            game_type = game['game_type']  # type of game.
+            tiebreaker_sw = game['tiebreaker_sw']  # tiebreaker?
+            if ((game_type != "E") and (game_type == "R" and tiebreaker_sw == "Y")):  # playoffs + tiebreaks
+                t['description'] = game['description']  # grab description from the XML.
+            else:  # otherwise, make sure it's none.
+                t['description'] = None
+            # regular variables.
             gametime = "{0} {1}".format(game['time_date'], game['hm_lg_ampm'])  # construct string.
             t['gametime'] = self._convertUTC(gametime)  # add in string as UTC time.
             t['scoringplays'] = game['game_data_directory'] + '/atv_runScoringPlays.xml'  # add in url.
@@ -365,18 +376,18 @@ class Hardball(callbacks.Plugin):
         # now do our http fetch.
         html = self._httpget(url)
         if not html:
-            self.log.error("ERROR: _gameevfetch :: HTTP ERROR fetching: {0} :: {1}".format(url))
+            self.log.info("ERROR _gameevfetch :: HTTP ERROR fetching: {0} :: {1}".format(url))
             return None
         # now lets try and parse the XML.
         try:
             tree = ElementTree.fromstring(html.decode('utf-8'))
         except Exception, e:
-            self.log.error("_gameevfetch :: Could not parse XML from {0} :: {1}".format(url, e))
+            self.log.info("_gameevfetch :: Could not parse XML from {0} :: {1}".format(url, e))
             return None
         # we can parse XML. Lets go and find the "last" scoring event.
         scev = tree.findall('body/eventGroup/event')
         if len(scev) == 0:  # make sure we found events...
-            self.log.error("ERROR: _gameevfetch: No scoring events found at {0}".format(url))
+            self.log.info("ERROR: _gameevfetch :: No scoring events found at {0}".format(url))
             return None
         else: # we did find events. lets return the 'last' and clean-up the text.
             t = {}  # tmp dict.
@@ -535,8 +546,11 @@ class Hardball(callbacks.Plugin):
         # construct pitching w/w-l + era.
         ap = "{0} ({1}-{2}, {3})".format(ev['apitcher'], ev['apitcherwins'], ev['apitcherlosses'], ev['apitcherera'])
         hp = "{0} ({1}-{2}, {3})".format(ev['hpitcher'], ev['hpitcherwins'], ev['hpitcherlosses'], ev['hpitcherera'])
-        # rest of the string
-        m = "{0} @ {1} :: {2} v. {3} :: {4}".format(at, ht, ap, hp, ircutils.mircColor("STARTING", 'green'))
+        # rest of the string. do we have a game description? (non-preseason, non-regular season)
+        if ev['description']:  # do have one.
+            m = "{0} @ {1} [{2}] :: {3} v. {4} :: {5}".format(at, ht, ircutils.bold(ev['description']), ap, hp, ircutils.mircColor("STARTING", 'green'))
+        else:  # exhibition/regular season.
+            m = "{0} @ {1} :: {2} v. {3} :: {4}".format(at, ht, ap, hp, ircutils.mircColor("STARTING", 'green'))
         # return the string.
         return m
 
@@ -568,7 +582,7 @@ class Hardball(callbacks.Plugin):
         if gameev: # if it works and we get something back
             m = "{0} - {1} :: {2} :: {3}".format(bl, ev['inningfull'], gameev['title'], gameev['event'])
         else: # gameev failed. just print the score.
-            self.log.error("ERROR: _gamescore :: Could not _gamevfetch for {0}".format(ev['id']))
+            self.log.info("ERROR: _gamescore :: Could not _gamevfetch for {0}".format(ev['id']))
             m = "{0} - {1}".format(bl, ev['inningfull'],)
         # return.
         return m
@@ -639,14 +653,14 @@ class Hardball(callbacks.Plugin):
             self.games = self._fetchgames()
         # verify we have a baseline.
         if not self.games:  # we don't. must bail.
-            self.log.error("checkhardball: after second try, I could not get self.games.")
+            self.log.info("checkhardball: after second try, I could not get self.games.")
             return
         else:  # we have games. setup the baseline stuff.
             games1 = self.games  # games to compare from.
         # now, we must grab new games. if something goes wrong or there are None, we bail.
         games2 = self._fetchgames()
         if not games2:  # if something went wrong, we bail.
-            self.log.error("checkhardball: I was unable to get new games2.")
+            self.log.info("checkhardball: I was unable to get new games2.")
             return
 
         # main part/main money in the loop. we compare games1 (old) vs. games2 (new) by keys.
