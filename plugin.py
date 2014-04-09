@@ -525,7 +525,7 @@ class Hardball(callbacks.Plugin):
     #########################
 
     def _boldleader(self, at, ats, ht, hts):
-        """Helper to bold the leader."""
+        """Helper to bold the leader. We'll disable it for now."""
 
         # bold the winner.
         if int(ats) > int(hts): # away team winning.
@@ -576,14 +576,16 @@ class Hardball(callbacks.Plugin):
         """Handles a scoring event."""
 
         # first, bold the leader (prefix part)
-        bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
+        # bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
         # now try and fetch the "scoring event"
         gameev = self._gameevfetch(ev['scoringplays'])
         if gameev: # if it works and we get something back
-            m = "{0} - {1} :: {2} :: {3}".format(bl, ev['inningfull'], gameev['title'], gameev['event'])
+            #m = "{0} - {1} :: {2} :: {3}".format(ev['inningfull'], gameev['title'], gameev['event'])
+            m = "{0} :: {1} :: {2}".format(ev['inningfull'], gameev['title'], gameev['event'])
         else: # gameev failed. just print the score.
             self.log.info("ERROR: _gamescore :: Could not _gamevfetch for {0}".format(ev['id']))
-            m = "{0} - {1}".format(bl, ev['inningfull'],)
+            #m = "{0} - {1}".format(bl, ev['inningfull'])
+            m = "{0}".format(ev['inningfull'],)
         # return.
         return m
 
@@ -676,11 +678,18 @@ class Hardball(callbacks.Plugin):
                     # SCORING EVENTS. WE CHECK IF ITS A WALK-OFF.
                     if ((v['awayscore'] < games2[k]['awayscore']) or (v['homescore'] < games2[k]['homescore'])):
                         self.log.info("{0} should post scoring event".format(k))
+                        # We're moving bolding here and not doing the leader. the team who scores will be bolded.
+                        if (v['awayscore'] < games2[k]['awayscore']):  # away scored. bold away.
+                            gstr = "{0} {1} @ {2} {3}".format(ircutils.bold(v['awayteam']), ircutils.bold(games2[k]['awayscore']), v['hometeam'], games2[k]['homescore'])
+                        else:  # home scored. bold the home.
+                            gstr = "{0} {1} @ {2} {3}".format(v['awayteam'], games2[k]['awayscore'], ircutils.bold(v['hometeam']), ircutils.bold(games2[k]['homescore']))
                         # CHECK IF ITS A WALK-OFF.
                         if ((games2[k]['inning'] > 8) and (v['homescore'] != games2[k]['homescore']) and (games2[k]['homescore'] > games2[k]['awayscore'])):  # WO.
-                            mstr = "{0} - {1}".format(self._gamescore(games2[k]), ircutils.bold(ircutils.underline("WALK-OFF")))
+                            #mstr = "{0} - {1}".format(self._gamescore(games2[k]), ircutils.bold(ircutils.underline("WALK-OFF")))
+                            mstr = "{0} - {1} - {2}".format(gstr, self._gamescore(games2[k]), ircutils.bold(ircutils.underline("WALK-OFF")))
                         else:  # NOT A WALKOFF. IE: REGULAR SCORING EVENT.
-                            mstr = self._gamescore(games2[k])
+                            #mstr = self._gamescore(games2[k])
+                            mstr = "{0} - {1}".format(gstr, self._gamescore(games2[k]))
                         # POST
                         self._post(irc, v['awayid'], v['homeid'], mstr)
                     # GAME IS GOING TO EXTRAS.
