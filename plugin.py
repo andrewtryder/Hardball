@@ -576,18 +576,16 @@ class Hardball(callbacks.Plugin):
         """Handles a scoring event."""
 
         # first, bold the leader (prefix part)
-        # bl = self._boldleader(ev['awayteam'], ev['awayscore'], ev['hometeam'], ev['homescore'])
-        # now try and fetch the "scoring event"
         gameev = self._gameevfetch(ev['scoringplays'])
-        if gameev: # if it works and we get something back
-            #m = "{0} - {1} :: {2} :: {3}".format(ev['inningfull'], gameev['title'], gameev['event'])
+        try:
+            #if gameev: # if it works and we get something back
             m = "{0} :: {1} :: {2}".format(ev['inningfull'], gameev['title'], gameev['event'])
-        else: # gameev failed. just print the score.
-            self.log.info("ERROR: _gamescore :: Could not _gamevfetch for {0}".format(ev['id']))
+            return m
+        except Exception as e: # gameev failed. just print the score.
+            self.log.info("ERROR: _gamescore :: ERROR {0}".format(e))
             #m = "{0} - {1}".format(bl, ev['inningfull'])
-            m = "{0}".format(ev['inningfull'])
-        # return.
-        return m
+            #m = "{0}".format(ev['inningfull'])
+            return "error fetching scoring information for game"
 
     def _extrainnings(self, ev):
         """Handles a game going to extras."""
