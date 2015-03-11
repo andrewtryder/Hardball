@@ -585,7 +585,7 @@ class Hardball(callbacks.Plugin):
         else: # gameev failed. just print the score.
             self.log.info("ERROR: _gamescore :: Could not _gamevfetch for {0}".format(ev['id']))
             #m = "{0} - {1}".format(bl, ev['inningfull'])
-            m = "{0}".format(ev['inningfull'],)
+            m = "{0}".format(ev['inningfull'])
         # return.
         return m
 
