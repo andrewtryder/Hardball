@@ -30,6 +30,7 @@ conf.registerGlobalValue(Hardball, 'logURLs', registry.Boolean(False, """Should 
 conf.registerGlobalValue(Hardball, 'checkInterval', registry.NonNegativeInteger(10, """Positive Integer in seconds to check."""))
 conf.registerChannelValue(Hardball, 'prefix', registry.Boolean(False, """Should we prefix output with the string"""))
 conf.registerChannelValue(Hardball, 'prefixString', registry.String("MLB: ", """Prefix String."""))
+conf.registerChannelValue(Hardball, 'inningToAnnounceNoHitter', registry.NonNegativeInteger(7, """Inning to announce when no-hitters are being thrown."""))
 
 
 # vim:set shiftwidth=4 tabstop=4 expandtab textwidth=79:

@@ -52,6 +52,11 @@ class Hardball(callbacks.Plugin):
         self.dupedict = {}
         # base url.
         self.baseurl = b64decode('aHR0cDovL2dkMi5tbGIuY29t')
+        try:
+            self.nohitterInning = self.registryValue('inningToAnnounceNoHitter')
+        except:
+            self.log.info('Registry value for no-hitter inning not set, defaulting to 7')
+            self.nohitterInning = 7
         # fill in the blanks.
         if not self.games:
             self.games = self._fetchgames()
@@ -696,7 +701,7 @@ class Hardball(callbacks.Plugin):
                         mstr = self._extrainnings(games2[k])
                         self._post(irc, v['awayid'], v['homeid'], mstr)
                     # NO HITTER CHECK HERE. WE ONLY CHECK FROM THE 6TH INNING AND ON.
-                    if ((v['inningfull'] != games2[k]['inningfull']) and (games2[k]['inning'] > 5) and ((games2[k]['homehits'] == 0) or (games2[k]['awayhits'] == 0))):
+                    if ((v['inningfull'] != games2[k]['inningfull']) and (games2[k]['inning'] > self.nohitterInning-1) and ((games2[k]['homehits'] == 0) or (games2[k]['awayhits'] == 0))):
                         self.log.info("{0} no hitter somewhere in here.".format(k))
                         # DETERMINE WHICH PITCHER HAS A NO-HITTER GOING ON.
                         if (games2[k]['homehits'] == 0):  # away no-hitter.
