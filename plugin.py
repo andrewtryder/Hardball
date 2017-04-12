@@ -693,6 +693,12 @@ class Hardball(callbacks.Plugin):
                         else:  # NOT A WALKOFF. IE: REGULAR SCORING EVENT.
                             #mstr = self._gamescore(games2[k])
                             mstr = "{0} - {1}".format(gstr, self._gamescore(games2[k]))
+                        # bot is duplcating some events because the score updates but the play doesnt, lets check if they are equal
+                        if mstr == games2[k]['lastevent']:
+                            # duplicate! gtfo
+                            return
+                        #looks ok, lets set it and post
+                        games2[k]['lastevent'] = mstr
                         # POST
                         self._post(irc, v['awayid'], v['homeid'], mstr)
                     # GAME IS GOING TO EXTRAS.
