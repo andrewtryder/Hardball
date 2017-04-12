@@ -694,11 +694,12 @@ class Hardball(callbacks.Plugin):
                             #mstr = self._gamescore(games2[k])
                             mstr = "{0} - {1}".format(gstr, self._gamescore(games2[k]))
                         # bot is duplcating some events because the score updates but the play doesnt, lets check if they are equal
-                        if mstr == games2[k]['lastevent']:
+                        play = mstr[mstr.rfind('::'):]
+                        if play == games2[k]['lastevent']:
                             # duplicate! gtfo
                             return
                         #looks ok, lets set it and post
-                        games2[k]['lastevent'] = mstr
+                        games2[k]['lastevent'] = play
                         # POST
                         self._post(irc, v['awayid'], v['homeid'], mstr)
                     # GAME IS GOING TO EXTRAS.
